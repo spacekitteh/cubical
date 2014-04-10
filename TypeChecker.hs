@@ -265,7 +265,7 @@ checkInfer e = case e of
         rho <- getOEnv
         v   <- eval rho u
         app f v
-      _       -> throwError $ show c ++ " is not a pi-type"
+      _       -> throwError $ show t ++ " has not a pi-type, but " ++ show c
   Fst t -> do
     c <- checkInfer t
     case c of
