@@ -7,6 +7,7 @@ module Eval ( evalTer
             , runEval
             , Eval
             , faceEnv
+            , faceCtxt
             , face
             ) where
 
@@ -122,6 +123,10 @@ apps = foldM app
 faceEnv :: OEnv -> Side -> Eval OEnv
 faceEnv e xd = mapOEnvM (`face` xd) e
 
+faceCtxt :: Ctxt -> Side -> Eval Ctxt
+faceCtxt c xd = traverseSnds (`face` xd) c
+
+
 faceName :: CVal -> Side -> CVal
 faceName Nothing _ = Nothing
 faceName (Just x) (y,d) | x == y    = Nothing
@@ -134,6 +139,9 @@ face u xdir@(x,dir) =
   VU          -> return VU
   Ter t e -> do e' <- e `faceEnv` xdir
                 eval e' t
+  VPi a f    -> VPi <$> fc a <*> fc f 
+  VSigma a f -> VSigma <$> fc a <*> fc f
+  VSPair a b -> VSPair <$> fc a <*> fc b
   VApp u v            -> appM (fc u) (fc v)
   VSplit u v          -> appM (fc u) (fc v)
   VVar s d            -> return $ VVar s [ faceName n xdir | n <- d ]

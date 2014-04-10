@@ -2,6 +2,7 @@
 module CTT where
 
 import Control.Applicative
+import Data.Traversable
 import Data.List
 import Pretty
 
@@ -30,6 +31,9 @@ type LblSum = [(Binder,Tele)]
 
 -- Context gives type values to identifiers
 type Ctxt   = [(Binder,Val)]
+
+traverseSnds :: Applicative m => (a -> m b) -> [(c,a)] -> m [(c,b)]
+traverseSnds f = traverse (\(x,y) -> (x,) <$> f y)
 
 -- Mutual recursive definitions: (x1 : A1) .. (xn : An) and x1 = e1 .. xn = en
 type Decls  = [(Binder,Ter,Ter)]
