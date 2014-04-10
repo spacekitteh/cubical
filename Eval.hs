@@ -193,7 +193,7 @@ conv k (VSPair u v)   w                =
   conv k u (fstSVal w) <&&> conv k v (sndSVal w)
 conv k w              (VSPair u v)     =
   conv k (fstSVal w) u <&&> conv k (sndSVal w) v
-conv k (VCSPair i u v)   (VCSPair j u' v')   = conv k u u' <&&> conv k v v'
+conv k (VCSPair i u v)   (VCSPair i' u' v')   = pure (i == i') <&&> conv k u u' <&&> conv k v v'
 conv k (VCSPair i u v)   w                =
   (conv k u =<< (face w (i,0))) <&&> conv k v (sndCSVal i w)
 conv k w              (VCSPair i u v)     =
