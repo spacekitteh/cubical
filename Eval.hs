@@ -78,6 +78,7 @@ eval e (Where t decls)      = eval (oPDef False decls e) t
 eval e (Con name ts)        = VCon name <$> mapM (eval e) ts
 eval e (Split pr alts)      = return $ Ter (Split pr alts) e
 eval e (Sum pr ntss)        = return $ Ter (Sum pr ntss) e
+eval e Undefined = return $ VVar "undefined" []
 
 evals :: OEnv -> [(Binder,Ter)] -> Eval [(Binder,Val)]
 evals env = sequenceSnd . map (second (eval env))

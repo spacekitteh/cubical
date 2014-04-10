@@ -188,14 +188,15 @@ checkTele ((x,a):xas) = do
 
 checkFace :: Side -> Val -> Ter -> Typing Val
 checkFace s v t = localM (modEnv (liftEval . flip faceEnv s)) $ checkAndEval v t
-    
+
 checkAndEval :: Val -> Ter -> Typing Val
 checkAndEval a t = do
   check a t
   eval' t
-  
+
 check :: Val -> Ter -> Typing ()
 check a t = case (a,t) of
+  (_,Undefined) -> return ()
   (t, Nabla _i a) -> do
     check t a -- Nabla is purely about scope checking (of colors).
   (_,Con c es) -> do

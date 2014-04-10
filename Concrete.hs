@@ -156,6 +156,7 @@ binds f = flip $ foldr $ bind f
 
 resolveExp :: Exp -> Resolver Ter
 resolveExp U            = return C.U
+resolveExp Undefined    = return C.Undefined
 resolveExp (Var x)      = resolveVar x
 resolveExp (App t s)    = C.mkApps <$> resolveExp x <*> mapM resolveExp xs
   where (x, xs) = unApps t [s]

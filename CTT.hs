@@ -75,6 +75,7 @@ data Ter = App Ter Ter
          | Split Loc [Brc]
          -- labelled sum c1 A1s,..., cn Ans (assumes terms are constructors)
          | Sum Loc LblSum
+         | Undefined
   deriving Eq
 
 -- For an expression t, returns (u,ts) where u is no application
@@ -345,6 +346,7 @@ instance Show Ter where
 
 showTer :: Ter -> String
 showTer U                      = "U"
+showTer Undefined                      = "Undefined"
 showTer (App e0 e1)            = showTer e0 <+> showTer1 e1
 showTer (Pi e0 e1)             = "Pi" <+> showTers [e0,e1]
 showTer (Lam (x,_) e)          = '\\' : x <+> "->" <+> showTer e

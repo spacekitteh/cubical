@@ -40,6 +40,7 @@ Pair.     Exp3 ::= "(" Exp "," Exp ")" ;
 CPair.    Exp3 ::= "(" Exp ",_" AIdent Exp ")" ;
 Var.      Exp3 ::= AIdent ;
 U.        Exp3 ::= "U" ;
+Undefined. Exp3 ::= "undefined" ;
 
 coercions Exp 3 ;
 
