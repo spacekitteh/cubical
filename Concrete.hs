@@ -169,9 +169,10 @@ resolveExp (Fun a b)    = bind C.Pi (AIdent ((0,0),"_"), a) (resolveExp b)
 resolveExp (Lam x xs t) = lams (x:xs) (resolveExp t)
 resolveExp (Fst t)      = C.Fst <$> resolveExp t
 resolveExp (Snd t)      = C.Snd <$> resolveExp t
-resolveExp (CSnd t i)   = do
+resolveExp (Nabla i t)  = do
   i' <- resolveBinder i
-  local (insertCol i') $ C.ColoredSnd <$> resolveCol i <*> resolveExp t
+  local (insertCol i') $ C.Nabla <$> resolveCol i <*> resolveExp t
+resolveExp (CSnd t i)   = C.ColoredSnd <$> resolveCol i <*> resolveExp t
 resolveExp (CSigma i t b) = case pseudoTele [t] of
   Just tele -> do
     i' <- resolveCol i

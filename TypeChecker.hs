@@ -196,6 +196,8 @@ checkAndEval a t = do
   
 check :: Val -> Ter -> Typing ()
 check a t = case (a,t) of
+  (t, Nabla _i a) -> do
+    check t a -- Nabla is purely about scope checking (of colors).
   (_,Con c es) -> do
     (bs,nu) <- getLblType c a
     checks (bs,nu) es
@@ -263,7 +265,7 @@ checkInfer e = case e of
         rho <- getOEnv
         v   <- eval rho u
         app f v
-      _       -> throwError $ show c ++ " is not a product"
+      _       -> throwError $ show c ++ " is not a pi-type"
   Fst t -> do
     c <- checkInfer t
     case c of
