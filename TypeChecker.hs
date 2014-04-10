@@ -187,7 +187,11 @@ checkTele ((x,a):xas) = do
   localM (addType (x,a)) $ checkTele xas
 
 checkFace :: Side -> Val -> Ter -> Typing Val
-checkFace s v t = localM (modEnv (liftEval . flip faceEnv s)) $ checkAndEval v t
+checkFace s v t = do
+  ctx <- asks ctxt
+  ctx' <- liftEval (faceCtxt ctx s)
+  local (\e -> e {ctxt = ctx'}) $ 
+    localM (modEnv (liftEval . flip faceEnv s)) $ checkAndEval v t
 
 checkAndEval :: Val -> Ter -> Typing Val
 checkAndEval a t = do
