@@ -71,6 +71,8 @@ eval e (ColoredPair i a b)  = VCSPair i <$> eval e a <*> eval e b
 eval e (Fst a)              = fstSVal <$> eval e a
 eval e (Snd a)              = sndSVal <$> eval e a
 eval e (ColoredSnd i a)     = sndCSVal i <$> eval e a
+eval e (ColoredFst i a)     = do v <- eval e a
+                                 face v (i,0)
 eval e (Nabla _i a)         = eval e a
 eval e (Where t decls)      = eval (oPDef False decls e) t
 eval e (Con name ts)        = VCon name <$> mapM (eval e) ts

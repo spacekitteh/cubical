@@ -290,6 +290,9 @@ checkInfer e = case e of
         vx0 <- liftEval $ face v (x,0)
         app f vx0
       _          -> throwError $ show c ++ " is not a colored sigma-type"
+  ColoredFst x t -> do
+    c <- checkInfer t
+    liftEval $ face c (x,0)
   Where t d -> do
     checkDecls d
     localM (addDecls d) $ checkInfer t

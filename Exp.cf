@@ -35,6 +35,7 @@ App.      Exp2 ::= Exp2 Exp3 ;
 Fst.      Exp3 ::= Exp3 ".1" ;
 Snd.      Exp3 ::= Exp3 ".2" ;
 CSnd.     Exp3 ::= Exp3 "._" AIdent ;
+CFst.     Exp3 ::= Exp3 ".0" AIdent ;
 Pair.     Exp3 ::= "(" Exp "," Exp ")" ;
 CPair.    Exp3 ::= "(" Exp ",_" AIdent Exp ")" ;
 Var.      Exp3 ::= AIdent ;

@@ -64,6 +64,7 @@ data Ter = App Ter Ter
          | ColoredSigma Color Ter Ter
          | ColoredPair Color Ter Ter
          | ColoredSnd Color Ter
+         | ColoredFst Color Ter -- 'face'
          | Nabla Color Ter
          | Where Ter ODecls
          | Var Ident
@@ -353,6 +354,7 @@ showTer (Sigma e0 e1)          = "Sigma" <+> showTers [e0,e1]
 showTer (SPair e0 e1)          = "pair" <+> showTers [e0,e1]
 showTer (Nabla i e)            = "Nabla" <+> show i ++ "." ++ showTer e
 showTer (ColoredSnd i e)       = showTer e ++ "." ++ show i
+showTer (ColoredFst i e)       = showTer e ++ "(" ++ show i ++ "=0)"
 showTer (ColoredSigma i e0 e1) = ("CSigma" ++ show i) <+> showTers [e0,e1]
 showTer (ColoredPair i e0 e1)  = ("Cpair" ++ show i) <+> showTers [e0,e1]
 showTer (Where e d)            = showTer e <+> "where" <+> showODecls d
