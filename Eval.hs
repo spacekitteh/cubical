@@ -97,6 +97,7 @@ sndCSVal i u | isNeutral u = VCSnd i u
 
 -- Application
 app :: Val -> Val -> Eval Val
+app (Ter (ColoredFst x t) e) u = flip face (x,0) =<< app (Ter t e) u
 app (Ter (Lam x t) e) u                         = eval (oPair e (x,u)) t
 app (Ter (Split _ nvs) e) (VCon name us) = case lookup name nvs of
     Just (xs,t)  -> eval (upds e (zip xs us)) t
@@ -138,8 +139,8 @@ face u xdir@(x,dir) =
   let fc v = v `face` xdir in case u of
   VU          -> return VU
   Ter t e -> do e' <- e `faceEnv` xdir
-                eval e' t
-  VPi a f    -> VPi <$> fc a <*> fc f 
+                return $ Ter (ColoredFst x t) e'
+  VPi a f    -> VPi <$> fc a <*> fc f
   VSigma a f -> VSigma <$> fc a <*> fc f
   VSPair a b -> VSPair <$> fc a <*> fc b
   VApp u v            -> appM (fc u) (fc v)
@@ -173,6 +174,9 @@ conv k VU VU                                  = return True
 conv k (Ter (Lam x u) e) (Ter (Lam x' u') e') = do
   let v = mkVar k $ support (e, e')
   convM (k+1) (eval (oPair e (x,v)) u) (eval (oPair e' (x',v)) u')
+conv k (Ter (ColoredFst i (Lam x u)) e) u' = do
+  let v = mkVar k $ support e
+  convM (k+1) (eval (oPair e (x,v)) (ColoredFst i u)) (app u' v)
 conv k (Ter (Lam x u) e) u' = do
   let v = mkVar k $ support e
   convM (k+1) (eval (oPair e (x,v)) u) (app u' v)
