@@ -137,9 +137,8 @@ face :: Val -> Side -> Eval Val
 face u xdir@(x,dir) =
   let fc v = v `face` xdir in case u of
   VU          -> return VU
-  Ter t e -> do e' <- e `faceEnv` xdir
-                eval e' t
-  VPi a f    -> VPi <$> fc a <*> fc f 
+  Ter (Lam y t) e -> Ter (Lam y $ ColoredFst x t) <$> faceEnv e xdir
+  VPi a f    -> VPi <$> fc a <*> fc f
   VSigma a f -> VSigma <$> fc a <*> fc f
   VSPair a b -> VSPair <$> fc a <*> fc b
   VApp u v            -> appM (fc u) (fc v)
