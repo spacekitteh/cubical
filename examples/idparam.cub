@@ -3,3 +3,5 @@ module idparam where
 thm : (f : (B : U) -> B -> B) (A : U) (P : A -> U) (a : A) (p : P a) -> P (f A a)
 thm f A P a p = Nabla i. (f (Ch i (x : A). P x) (a ,_ i p))._i
 
+-- binthm : (f : (A : U) -> A -> A) (A : U) (P : A -> A -> U) (a1 a2 : A) (p : P a1 a2) -> P (f A a1) (f A a2)
+-- binthm f A P a1 a2 p = Nabla i. Nabla j. (f (Ch i (x : A). (Ch j (y : A). P x y)) (a1 ,_ i (a2 ,_ j p)))._j._i

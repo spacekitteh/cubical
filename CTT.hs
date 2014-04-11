@@ -256,7 +256,7 @@ instance Nominal Val where
     -- VCSnd z u | z /= x && z /= y -> VCSnd z (sw u)
     --           | otherwise        -> let z' = fresh ([x, y], u)
     --                                     v  = swap u z z'
-                                    in VCSnd z' (sw v)
+                                    -- in VCSnd z' (sw v)
    where sw u = swap u x y
 
 
@@ -396,6 +396,7 @@ instance Show Val where
 
 showVal :: Val -> String
 showVal VU              = "U"
+showVal (VPi u v)       = "Pi" <+> showVals [u,v]
 showVal (Ter t env)     = show t <+> show env
 showVal (VApp u v)      = showVal u <+> showVal1 v
 showVal (VAppName u n)  = showVal u <+> "@" <+> show n
