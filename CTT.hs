@@ -250,9 +250,12 @@ instance Nominal Val where
     VCSPair i u v                -> VCSPair (sw i) (sw u) (sw v)
     VFst u                       -> VFst (sw u)
     VSnd u                       -> VSnd (sw u)
-    VCSnd z u | z /= x && z /= y -> VCSnd z (sw u)
-              | otherwise        -> let z' = fresh ([x, y], u)
-                                        v  = swap u z z'
+    VCSnd i u ->   VCSnd (sw i) (sw u)
+
+    -- VCSnd no longer introduces a color. 
+    -- VCSnd z u | z /= x && z /= y -> VCSnd z (sw u)
+    --           | otherwise        -> let z' = fresh ([x, y], u)
+    --                                     v  = swap u z z'
                                     in VCSnd z' (sw v)
    where sw u = swap u x y
 
