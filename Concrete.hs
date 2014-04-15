@@ -181,6 +181,7 @@ resolveExp (CSigma i t b) = case pseudoTele [t] of
     binds (C.ColoredSigma i') tele (resolveExp b)
   Nothing   -> throwError "telescope malformed in colored Sigma"
 resolveExp (CPair t0 i t1) = C.ColoredPair <$> resolveCol i <*> resolveExp t0 <*>resolveExp t1
+resolveExp (CFPair t0 i t1) = C.ColoredFunPair <$> resolveCol i <*> resolveExp t0 <*>resolveExp t1
 resolveExp (Pair t0 t1) = C.SPair <$> resolveExp t0 <*> resolveExp t1
 resolveExp (Split brs)  = do
     brs' <- mapM resolveBranch brs

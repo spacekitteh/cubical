@@ -7,7 +7,7 @@ module Eval ( evalTer
             , runEval
             , Eval
             , faceEnv
-            , faceCtxt
+            -- , faceCtxt
             , face
             ) where
 
@@ -46,8 +46,8 @@ evalTers b env bts = runEval b (evals env bts)
 appVal :: Bool -> Val -> Val -> Val
 appVal b v1 v2 = runEval b $ app v1 v2
 
-convVal :: Bool -> Int -> Val -> Val -> Bool
-convVal b k v1 v2 = runEval b $ conv k v1 v2
+convVal :: Bool -> Int -> [Color] -> Val -> Val -> Bool
+convVal b k cs v1 v2 = runEval b $ conv k cs v1 v2
 
 look :: Ident -> OEnv -> Eval (Binder, Val)
 look x (OEnv (Pair rho (n@(y,l),u)) opaques)
@@ -69,6 +69,7 @@ eval e (Sigma a b)          = VSigma <$> eval e a <*> eval e b
 eval e (SPair a b)          = VSPair <$> eval e a <*> eval e b
 eval e (ColoredSigma i a b) = VCSigma i <$> eval e a <*> eval e b
 eval e (ColoredPair i a b)  = VCSPair i <$> eval e a <*> eval e b
+eval e (ColoredFunPair i a b)  = VCFPair i <$> eval e a <*> eval e b
 eval e (Fst a)              = fstSVal <$> eval e a
 eval e (Snd a)              = sndSVal <$> eval e a
 eval e (ColoredSnd i a)     = sndCSVal i <$> eval e a
@@ -105,6 +106,9 @@ app (Ter (Split _ nvs) e) (VCon name us) = case lookup name nvs of
 app u@(Ter (Split _ _) _) v
   | isNeutral v = return $ VSplit u v -- v should be neutral
   | otherwise   = error $ "app: (VSplit) " ++ show v ++ " is not neutral"
+app (VCFPair i a b) v = do
+  vi0 <- face v (i,0)
+  VCSPair i <$> app a vi0 <*> apps b [vi0, sndCSVal i v]
 app r s
   | isNeutral r = return $ VApp r s -- r should be neutral
   | otherwise   = error $ "app: (VApp) " ++ show r ++ " is not neutral"
@@ -123,8 +127,8 @@ apps = foldM app
 faceEnv :: OEnv -> Side -> Eval OEnv
 faceEnv e xd = mapOEnvM (`face` xd) e
 
-faceCtxt :: Ctxt -> Side -> Eval Ctxt
-faceCtxt c xd = traverseSnds (`face` xd) c
+-- faceCtxt :: Ctxt -> Side -> Eval Ctxt
+-- faceCtxt c xd = traverseSnds (`face` xd) c
 
 
 faceName :: CVal -> Side -> CVal
@@ -136,8 +140,8 @@ faceName (Just x) (y,d) | x == y    = Nothing
 face :: Val -> Side -> Eval Val
 face u xdir@(x,dir) =
   let fc v = v `face` xdir in case u of
-  VU          -> return VU
-  Ter (Lam y t) e -> Ter (Lam y $ ColoredFst x t) <$> faceEnv e xdir
+  VU         -> return VU
+  Ter t e    -> Ter t <$> faceEnv e xdir
   VPi a f    -> VPi <$> fc a <*> fc f
   VSigma a f -> VSigma <$> fc a <*> fc f
   VSPair a b -> VSPair <$> fc a <*> fc b
@@ -150,6 +154,8 @@ face u xdir@(x,dir) =
                 | otherwise -> VCSigma y <$> fc a <*> fc f
   VCSPair y a f | x == y -> return a
                 | otherwise -> VCSPair y <$> fc a <*> fc f
+  VCFPair y a f | x == y -> return a
+                | otherwise -> VCFPair y <$> fc a <*> fc f
   VCSnd y p  -> sndCSVal y <$> fc p
 
 faceM :: Eval Val -> Side -> Eval Val
@@ -167,57 +173,56 @@ a <==> b = return (a == b)
 andM :: [Eval Bool] -> Eval Bool
 andM = liftM and . sequence
 
-conv :: Int -> Val -> Val -> Eval Bool
-conv k VU VU                                  = return True
-conv k (Ter (Lam x u) e) (Ter (Lam x' u') e') = do
-  let v = mkVar k $ support (e, e')
-  convM (k+1) (eval (oPair e (x,v)) u) (eval (oPair e' (x',v)) u')
-conv k (Ter (Lam x u) e) u' = do
-  let v = mkVar k $ support e
-  convM (k+1) (eval (oPair e (x,v)) u) (app u' v)
-conv k u' (Ter (Lam x u) e) = do
-  let v = mkVar k $ support e
-  convM (k+1) (app u' v) (eval (oPair e (x,v)) u)
-conv k (Ter (Split p _) e) (Ter (Split p' _) e') =
-  liftM ((p == p') &&) $ convEnv k e e'
-conv k (Ter (Sum p _) e)   (Ter (Sum p' _) e') =
-  ((p == p') &&) <$> convEnv k e e'
-conv k (VPi u v) (VPi u' v') = do
-  let w = mkVar k $ support [u,u',v,v']
-  conv k u u' <&&> convM (k+1) (app v w) (app v' w)
-conv k (VSigma u v) (VSigma u' v') = do
-  let w = mkVar k $ support [u,u',v,v']
-  conv k u u' <&&> convM (k+1) (app v w) (app v' w)
-conv k (VCSigma i u v) (VCSigma i' u' v') = do
-  let w = mkVar k $ support [u,u',v,v']
-  ((i == i') &&) <$> conv k u u' <&&> convM (k+1) (app v w) (app v' w)
-conv k (VFst u) (VFst u')                     = conv k u u'
-conv k (VSnd u) (VSnd u')                     = conv k u u'
-conv k (VCSnd i u) (VCSnd i' u')              = pure (i == i') <&&> conv k u u'
-conv k (VCon c us) (VCon c' us') =
-  liftM (\bs -> (c == c') && and bs) (zipWithM (conv k) us us')
-conv k (VSPair u v)   (VSPair u' v')   = conv k u u' <&&> conv k v v'
-conv k (VSPair u v)   w                =
-  conv k u (fstSVal w) <&&> conv k v (sndSVal w)
-conv k w              (VSPair u v)     =
-  conv k (fstSVal w) u <&&> conv k (sndSVal w) v
-conv k (VCSPair i u v)   (VCSPair i' u' v')   = pure (i == i') <&&> conv k u u' <&&> conv k v v'
-conv k (VCSPair i u v)   w                =
-  (conv k u =<< (face w (i,0))) <&&> conv k v (sndCSVal i w)
-conv k w              (VCSPair i u v)     =
-  (conv k u =<< (face w (i,0))) <&&> conv k v (sndCSVal i w)
-conv k (VApp u v)     (VApp u' v')     = conv k u u' <&&> conv k v v'
-conv k (VAppName u x) (VAppName u' x') = conv k u u' <&&> (x <==> x')
-conv k (VSplit u v)   (VSplit u' v')   = conv k u u' <&&> conv k v v'
-conv k (VVar x d)     (VVar x' d')     = return $ (x == x')   && (d == d')
-conv k _              _                = return False
-
+conv :: Int -> [Color] -> Val -> Val -> Eval Bool
+conv k cs v1 v2 =
+  let cv = conv k cs in
+  case (v1, v2) of
+    (VU, VU) -> return True
+    (Ter (Lam x u) e, Ter (Lam x' u') e') -> do
+      let v = mkVar k cs
+      convM (k+1) cs (eval (oPair e (x,v)) u) (eval (oPair e' (x',v)) u')
+    (Ter (Lam x u) e, u') -> do
+      let v = mkVar k cs
+      convM (k+1) cs (eval (oPair e (x,v)) u) (app u' v)
+    (u', Ter (Lam x u) e) -> do
+      let v = mkVar k cs
+      convM (k+1) cs (app u' v) (eval (oPair e (x,v)) u)
+    (Ter (Split p _) e, Ter (Split p' _) e') -> liftM ((p == p') &&) $ convEnv k cs e e'
+    (Ter (Sum p _) e,   Ter (Sum p' _) e')   -> ((p == p') &&) <$> convEnv k cs e e'
+    (VPi u v, VPi u' v') -> do
+      let w = mkVar k cs
+      cv u u' <&&> convM (k+1) cs (app v w) (app v' w)
+    (VSigma u v, VSigma u' v') -> do
+      let w = mkVar k cs
+      cv u u' <&&> convM (k+1) cs (app v w) (app v' w)
+    (VCSigma i u v, VCSigma i' u' v') -> do
+      let w = mkVar k cs
+      ((i == i') &&) <$> cv u u' <&&> convM (k+1) cs (app v w) (app v' w)
+    (VFst u, VFst u')          -> cv u u'
+    (VSnd u, VSnd u')          -> cv u u'
+    (VCSnd i u, VCSnd i' u')   -> pure (i == i') <&&> conv k (i:cs) u u' -- Is this correct ?
+    (VCon c us, VCon c' us')   -> liftM (\bs -> (c == c') && and bs) (zipWithM (cv) us us')
+    (VSPair u v, VSPair u' v') -> cv u u' <&&> cv v v'
+    (VSPair u v, w)            -> cv u (fstSVal w) <&&> cv v (sndSVal w)
+    (w, VSPair u v)            -> cv (fstSVal w) u <&&> cv (sndSVal w) v
+    (VCSPair i u v, VCSPair i' u' v')  -> pure (i == i') <&&> cv u u' <&&> cv v v'
+    (VCSPair i u v, w)                 -> (cv u =<< (face w (i,0))) <&&> cv v (sndCSVal i w)
+    (w,             VCSPair i u v)     -> (cv u =<< (face w (i,0))) <&&> cv v (sndCSVal i w)
+    (VCFPair i u v, VCFPair i' u' v')  -> pure (i == i') <&&> cv u u' <&&> cv v v'
+    (VCFPair i u v, w)              -> (cv u =<< (face w (i,0))) <&&> cv v (sndCSVal i w)
+    (w,             VCFPair i u v)  -> (cv u =<< (face w (i,0))) <&&> cv v (sndCSVal i w)
+    (VApp u v,      VApp u' v')     -> cv u u' <&&> cv v v'
+    (VAppName u x,  VAppName u' x') -> cv u u' <&&> (x <==> x')
+    (VSplit u v,    VSplit u' v')   -> cv u u' <&&> cv v v'
+    (VVar x d,      VVar x' d')     -> return $ (x == x')   && (d == d')
+    _                               -> return False
+  
 -- Monadic version of conv
-convM :: Int -> Eval Val -> Eval Val -> Eval Bool
-convM k v1 v2 = do
+convM :: Int -> [Color] -> Eval Val -> Eval Val -> Eval Bool
+convM k cs v1 v2 = do
   v1' <- v1
   v2' <- v2
-  conv k v1' v2'
+  conv k cs v1' v2'
 
-convEnv :: Int -> OEnv -> OEnv -> Eval Bool
-convEnv k e e' = liftM and $ zipWithM (conv k) (valOfOEnv e) (valOfOEnv e')
+convEnv :: Int -> [Color] -> OEnv -> OEnv -> Eval Bool
+convEnv k cs e e' = liftM and $ zipWithM (conv k cs) (valOfOEnv e) (valOfOEnv e')

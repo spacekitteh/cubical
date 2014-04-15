@@ -30,7 +30,10 @@ type Tele   = [(Binder,Ter)]
 type LblSum = [(Binder,Tele)]
 
 -- Context gives type values to identifiers
-type Ctxt   = [(Binder,Val)]
+data Ctxt   = EmptyCtxt
+            | ColorCtxt Color Ctxt
+            | BinderCtxt Binder Val Ctxt
+  deriving (Eq, Show)
 
 traverseSnds :: Applicative m => (a -> m b) -> [(c,a)] -> m [(c,b)]
 traverseSnds f = traverse (\(x,y) -> (x,) <$> f y)
@@ -67,6 +70,7 @@ data Ter = App Ter Ter
          | Snd Ter
          | ColoredSigma Color Ter Ter
          | ColoredPair Color Ter Ter
+         | ColoredFunPair Color Ter Ter
          | ColoredSnd Color Ter
          | ColoredFst Color Ter -- 'face'
          | Nabla Color Ter
@@ -176,6 +180,17 @@ sequenceSnd ((a,b):abs) = do
   acs <- sequenceSnd abs
   return $ (a,b') : acs
 
+ctxtColors :: Ctxt -> [Color]
+ctxtColors EmptyCtxt          = []
+ctxtColors (ColorCtxt i c)    = i : ctxtColors c
+ctxtColors (BinderCtxt _ _ c) = ctxtColors c
+
+subCtxt :: Color -> Ctxt -> Ctxt
+subCtxt i EmptyCtxt                   = EmptyCtxt
+subCtxt i (ColorCtxt j c) | i == j    = c
+                          | otherwise = subCtxt i c
+subCtxt i (BinderCtxt _ _ c)          = subCtxt i c
+
 --------------------------------------------------------------------------------
 -- | Values
 
@@ -188,6 +203,8 @@ data Val = VU
 
          | VCSigma Color Val Val
          | VCSPair Color Val Val
+
+         | VCFPair Color Val Val
 
          | VCon Ident [Val]
 
@@ -312,6 +329,12 @@ upds = foldl oPair
 lookupIdent :: Ident -> [(Binder,a)] -> Maybe (Binder, a)
 lookupIdent x defs = lookup x [(y,((y,l),t)) | ((y,l),t) <- defs]
 
+lookupCtxt :: Ident -> Ctxt -> Maybe Val
+lookupCtxt _x EmptyCtxt = Nothing
+lookupCtxt x (ColorCtxt i c) = lookupCtxt x c
+lookupCtxt x (BinderCtxt (y,_) v c) | x == y    = Just v
+                                    | otherwise = lookupCtxt x c
+
 getIdent :: Ident -> [(Binder,a)] -> Maybe a
 getIdent x defs = snd <$> lookupIdent x defs
 
@@ -366,6 +389,7 @@ showTer (ColoredSnd i e)       = showTer e ++ "." ++ show i
 showTer (ColoredFst i e)       = showTer e ++ "(" ++ show i ++ "=0)"
 showTer (ColoredSigma i e0 e1) = ("CSigma" ++ show i) <+> showTers [e0,e1]
 showTer (ColoredPair i e0 e1)  = ("Cpair" ++ show i) <+> showTers [e0,e1]
+showTer (ColoredFunPair i e0 e1)  = ("CFpair" ++ show i) <+> showTers [e0,e1]
 showTer (Where e d)            = showTer e <+> "where" <+> showODecls d
 showTer (Var x)                = x
 showTer (Con c es)             = c <+> showTers es
@@ -405,6 +429,7 @@ showVal (VVar x d)      = x <+> showDim d
 showVal (VSPair u v)    = "pair" <+> showVals [u,v]
 showVal (VSigma u v)    = "Sigma"<+> showVals [u,v]
 showVal (VCSPair i u v) = "Cpair" ++ show i  <+> showVals [u,v]
+showVal (VCFPair i u v) = "CFpair" ++ show i  <+> showVals [u,v]
 showVal (VCSigma i u v) = "CSigma"  ++ show i <+> showVals [u,v]
 showVal (VFst u)        = showVal u ++ ".1"
 showVal (VSnd u)        = showVal u ++ ".2"

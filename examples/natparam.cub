@@ -5,5 +5,6 @@ thm : (f : (B : U) -> (B -> B) -> B -> B)
       (z : A) (p : P z)
       (s : A -> A) (q : (a : A) -> P a -> P (s a)) ->
       P (f A s z)
-thm f A P z p s q = Nabla i. (f (Ch i (x : A). P x) (\y -> (s y ,_i q (y .0 i) y._i)) (z ,_ i p))._i
+thm f A P z p s q =
+  Nabla i. (f (Ch i (x : A). P x) <\x -> s x ,_i \y z -> q y z> (z ,_i p))._i
 

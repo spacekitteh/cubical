@@ -1,3 +1,4 @@
+{-# LANGUAGE RecordWildCards #-}
 module TypeChecker ( runDecls
                    , runDeclss
                    , runInfer
@@ -24,6 +25,11 @@ import Eval
 trace :: String -> Typing ()
 trace s = do
   b <- getVerbose
+  if b then liftIO (putStrLn s) else return ()
+
+traceb :: String -> Typing ()
+traceb s = do
+  b <- getDebug
   if b then liftIO (putStrLn s) else return ()
 
 -- Type checking monad
@@ -72,16 +78,16 @@ evals rho t = do
   b <- getDebug
   return $ evalTers b rho t
 
-conv :: Int -> Val -> Val -> Typing Bool
-conv k v1 v2 = do
+conv :: Int -> [Color] -> Val -> Val -> Typing Bool
+conv k cs v1 v2 = do
   b <- getDebug
-  return $ convVal b k v1 v2
+  return $ convVal b k cs v1 v2
 
 addC :: Ctxt -> (Tele,OEnv) -> [(Binder,Val)] -> Typing Ctxt
 addC gam _             []          = return gam
 addC gam ((y,a):as,nu) ((x,u):xus) = do
   v <- eval nu a
-  addC ((x,v):gam) (as,oPair nu (y,u)) xus
+  addC (BinderCtxt x v gam) (as,oPair nu (y,u)) xus
 
 -- Extract the type of a label as a closure
 getLblType :: String -> Val -> Typing (Tele, OEnv)
@@ -92,8 +98,8 @@ getLblType c u = throwError ("expected a data type for the constructor "
                              ++ c ++ " but got " ++ show u)
 
 -- Environment for type checker
-data TEnv = TEnv { index   :: Int   -- for de Bruijn levels
-                 , oenv     :: OEnv
+data TEnv = TEnv { index   :: Int   -- for de Bruijn levels (for fresh variables)
+                 , oenv    :: OEnv
                  , ctxt    :: Ctxt
                  , verbose :: Bool  -- Should it be verbose and print
                                     -- what it typechecks?
@@ -103,19 +109,28 @@ data TEnv = TEnv { index   :: Int   -- for de Bruijn levels
   deriving (Eq,Show)
 
 verboseEnv :: Bool -> TEnv
-verboseEnv debug = TEnv 0 oEmpty [] True debug
+verboseEnv debug = TEnv 0 oEmpty EmptyCtxt True debug
 
 silentEnv :: TEnv
-silentEnv = TEnv 0 oEmpty [] False False
+silentEnv = TEnv 0 oEmpty EmptyCtxt False False
+
+addTypeAndVal :: Binder -> Val -> Val -> TEnv -> TEnv
+addTypeAndVal x typ val tenv@(TEnv {..}) =
+ tenv { index = index + 1
+      , oenv = oPair oenv (x, val)
+      , ctxt = BinderCtxt x typ ctxt} 
 
 addTypeVal :: (Binder,Val) -> TEnv -> TEnv
-addTypeVal p@(x,_) (TEnv k rho gam v d) =
-  TEnv (k+1) (oPair rho (x,mkVar k (support rho))) (p:gam) v d
+addTypeVal p@(x,tx) tenv =
+   addTypeAndVal x tx (mkVar (index tenv) (ctxtColors (ctxt tenv))) tenv
 
 addType :: (Binder,Ter) -> TEnv -> Typing TEnv
 addType (x,a) tenv@(TEnv _ rho _ _ _) = do
   v <- eval rho a
   return $ addTypeVal (x,v) tenv
+
+addColor :: Color -> TEnv -> TEnv
+addColor i tenv@(TEnv {..}) = tenv {ctxt = ColorCtxt i ctxt}
 
 modEnv :: (OEnv -> Typing OEnv) -> TEnv -> Typing TEnv
 modEnv f tenv = do fenv <- f (oenv tenv); return tenv {oenv = fenv}
@@ -186,12 +201,13 @@ checkTele ((x,a):xas) = do
   check VU a
   localM (addType (x,a)) $ checkTele xas
 
+subTEnv :: Color -> TEnv -> TEnv
+subTEnv i tenv = tenv {ctxt = subCtxt i (ctxt tenv)}
+
 checkFace :: Side -> Val -> Ter -> Typing Val
-checkFace s v t = do
-  ctx <- asks ctxt
-  ctx' <- liftEval (faceCtxt ctx s)
-  local (\e -> e {ctxt = ctx'}) $ 
-    localM (modEnv (liftEval . flip faceEnv s)) $ checkAndEval v t
+checkFace s@(i,d) v t = do
+  ctx <- subCtxt i <$> asks ctxt
+  local (\e -> e {ctxt = ctx}) $ checkAndEval v t
 
 checkAndEval :: Val -> Ter -> Typing Val
 checkAndEval a t = do
@@ -201,8 +217,8 @@ checkAndEval a t = do
 check :: Val -> Ter -> Typing ()
 check a t = case (a,t) of
   (_,Undefined) -> return ()
-  (t, Nabla _i a) -> do
-    check t a -- Nabla is purely about scope checking (of colors).
+  (t, Nabla i a) -> do
+    local (addColor i) $ check t a -- Nabla is purely about scope checking (of colors).
   (_,Con c es) -> do
     (bs,nu) <- getLblType c a
     checks (bs,nu) es
@@ -212,8 +228,8 @@ check a t = case (a,t) of
   (VU,Sigma a (Lam x b)) -> do
     check VU a
     localM (addType (x,a)) $ check VU b
-  (VU,ColoredSigma i a (Lam x b)) -> do
-    a0 <- checkFace (i,0) VU a
+  (VU,ColoredSigma i a (Lam x b)) -> local (subTEnv i) $ do
+    a0 <- checkAndEval VU a
     local (addTypeVal (x,a0)) $ check VU b
   (VU,Sum _ bs) -> sequence_ [checkTele as | (_,as) <- bs]
   (VPi (Ter (Sum _ cas) nu) f,Split _ ces) ->
@@ -229,21 +245,43 @@ check a t = case (a,t) of
     e <- getOEnv
     v <- eval e t1
     checkM (app f v) t2
-  (VCSigma x a f, ColoredPair y t1 t2) -> do
+  (VCSigma x a f, ColoredPair y t1 t2) -> local (subTEnv x) $ do
     when (x /= y) $
       throwError $ "The dimension of the pair and sigma differ: "
                    ++ show x ++ " " ++ show y
-    v <- checkFace (x,0) a t1
+    v <- checkAndEval a t1
     checkM (app f v) t2
+  (VPi (VCSigma i a f) g, ColoredFunPair j (Lam x t1) (Lam y (Lam z t2))) ->
+      local (subTEnv i) $ do
+        when (i /= j) $
+             throwError $ "The dimension of the cfpair and csigma differ: "
+                            ++ show i ++ " " ++ show j
+        c <- getCtxt
+        k <- getIndex
+        let u = mkVar k (ctxtColors c) 
+        gu   <- app g u
+        ui0  <- liftEval $ face u (i,0)
+        fui0  <- app f ui0
+        case gu of
+          VCSigma i' b h | i == i' -> do 
+            v1 <- local (addTypeAndVal x ui0 a) $ checkAndEval b t1
+            local (addTypeAndVal y ui0 a) $
+              local (addTypeAndVal z (VCSnd i u) fui0) $
+                  checkM (app h v1) t2
+          _ -> throwError $ "check (funpair): " ++ show gu ++ " is not well formed"
   (_,Where e d) -> do
     checkDecls d
     localM (addDecls d) $ check a e
   _ -> do
     v <- checkInfer t
     k <- getIndex
-    b <- conv k v a
+    gam <- getCtxt
+    rho <- getOEnv
+    b <- conv k (ctxtColors gam) v a
     unless b $
-      throwError $ "check conv: " ++ show v ++ " /= " ++ show a
+      throwError $ "check conv: the actual type of " ++ show t ++ ": \n       "
+                 ++ show a ++ " is not convertible to the expected type " ++ show v
+                 ++ "\n\nin  "  ++ show gam ++ "\nand\n  " ++ show rho
 
 checkBranch :: (Tele,OEnv) -> Val -> Brc -> Typing ()
 checkBranch (xas,nu) f (c,(xs,e)) = do
@@ -259,7 +297,7 @@ checkInfer e = case e of
   U -> return VU                 -- U : U
   Var n -> do
     gam <- getCtxt
-    case getIdent n gam of
+    case lookupCtxt n gam of
       Just v  -> return v
       Nothing -> throwError $ show n ++ " is not declared!"
   App t u -> do
