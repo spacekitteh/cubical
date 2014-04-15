@@ -264,9 +264,9 @@ check a t = case (a,t) of
         fui0  <- app f ui0
         case gu of
           VCSigma i' b h | i == i' -> do 
-            v1 <- local (addTypeAndVal x ui0 a) $ checkAndEval b t1
-            local (addTypeAndVal y ui0 a) $
-              local (addTypeAndVal z (VCSnd i u) fui0) $
+            v1 <- local (addTypeAndVal x a ui0) $ checkAndEval b t1
+            local (addTypeAndVal y a ui0) $
+              local (addTypeAndVal z fui0 (VCSnd i u)) $
                   checkM (app h v1) t2
           _ -> throwError $ "check (funpair): " ++ show gu ++ " is not well formed"
   (_,Where e d) -> do
