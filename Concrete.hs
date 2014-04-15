@@ -175,7 +175,7 @@ resolveExp (Nabla i t)  = do
   local (insertCol i') $ C.Nabla <$> resolveCol i <*> resolveExp t
 resolveExp (CSnd t i)   = C.ColoredSnd <$> resolveCol i <*> resolveExp t
 resolveExp (CFst t i)   = C.ColoredFst <$> resolveCol i <*> resolveExp t
-resolveExp (CSigma i t b) = case pseudoTele [t] of
+resolveExp (CSigma t i b) = case pseudoTele [t] of
   Just tele -> do
     i' <- resolveCol i
     binds (C.ColoredSigma i') tele (resolveExp b)
