@@ -64,7 +64,7 @@ eval e (Var i)              = do
   (x,v) <- look i e
   return $ if x `elem` opaques e then VVar ("opaque_" ++ show x) $ map Just (support v) else v
 eval e (Pi a b)             = VPi <$> eval e a <*> eval e b
-eval e (Lam x t)            = return $ Ter (Lam x t) e -- stop at lambdas
+eval e (Lam x t)            = return $ Ter [] (Lam x t) e -- stop at lambdas
 eval e (Sigma a b)          = VSigma <$> eval e a <*> eval e b
 eval e (SPair a b)          = VSPair <$> eval e a <*> eval e b
 eval e (ColoredSigma i a b) = VCSigma i <$> eval e a <*> eval e b
@@ -78,8 +78,8 @@ eval e (ColoredFst i a)     = do v <- eval e a
 eval e (Nabla _i a)         = eval e a
 eval e (Where t decls)      = eval (oPDef False decls e) t
 eval e (Con name ts)        = VCon name <$> mapM (eval e) ts
-eval e (Split pr alts)      = return $ Ter (Split pr alts) e
-eval e (Sum pr ntss)        = return $ Ter (Sum pr ntss) e
+eval e (Split pr alts)      = return $ Ter [] (Split pr alts) e
+eval e (Sum pr ntss)        = return $ Ter [] (Sum pr ntss) e
 eval e Undefined = return $ VVar "undefined" []
 
 evals :: OEnv -> [(Binder,Ter)] -> Eval [(Binder,Val)]
@@ -98,12 +98,12 @@ sndCSVal i u | isNeutral u = VCSnd i u
 
 -- Application
 app :: Val -> Val -> Eval Val
-app (Ter (Lam x t) e) u                         = eval (oPair e (x,u)) t
-app (Ter (Split _ nvs) e) (VCon name us) = case lookup name nvs of
-    Just (xs,t)  -> eval (upds e (zip xs us)) t
+app (Ter f (Lam x t) e) u                         = faces f =<< eval (oPair e (x,u)) t
+app (Ter f (Split _ nvs) e) (VCon name us) = case lookup name nvs of
+    Just (xs,t)  -> faces f =<< eval (upds e (zip xs us)) t
     Nothing -> error $ "app: Split with insufficient arguments; " ++
                         "missing case for " ++ name
-app u@(Ter (Split _ _) _) v
+app u@(Ter f (Split _ _) _) v
   | isNeutral v = return $ VSplit u v -- v should be neutral
   | otherwise   = error $ "app: (VSplit) " ++ show v ++ " is not neutral"
 app (VCFPair i a b) v = do
@@ -136,12 +136,16 @@ faceName Nothing _ = Nothing
 faceName (Just x) (y,d) | x == y    = Nothing
                         | otherwise = Just x
 
+faces :: [Color] -> Val -> Eval Val
+faces [] x = return x
+faces (c:cs) x = (`face` (c,0)) =<< faces cs x
+
 -- Compute the face of a value
 face :: Val -> Side -> Eval Val
 face u xdir@(x,dir) =
   let fc v = v `face` xdir in case u of
   VU         -> return VU
-  Ter t e    -> Ter t <$> faceEnv e xdir
+  Ter fs t e    -> return $ Ter (x:fs) t e
   VPi a f    -> VPi <$> fc a <*> fc f
   VSigma a f -> VSigma <$> fc a <*> fc f
   VSPair a b -> VSPair <$> fc a <*> fc b
@@ -178,17 +182,17 @@ conv k cs v1 v2 =
   let cv = conv k cs in
   case (v1, v2) of
     (VU, VU) -> return True
-    (Ter (Lam x u) e, Ter (Lam x' u') e') -> do
+    (Ter f (Lam x u) e, Ter f' (Lam x' u') e') -> do
       let v = mkVar k cs
-      convM (k+1) cs (eval (oPair e (x,v)) u) (eval (oPair e' (x',v)) u')
-    (Ter (Lam x u) e, u') -> do
+      convM (k+1) cs (faces f =<< eval (oPair e (x,v)) u) (faces f' =<< eval (oPair e' (x',v)) u')
+    (Ter f (Lam x u) e, u') -> do
       let v = mkVar k cs
-      convM (k+1) cs (eval (oPair e (x,v)) u) (app u' v)
-    (u', Ter (Lam x u) e) -> do
+      convM (k+1) cs (faces f =<< eval (oPair e (x,v)) u) (app u' v)
+    (u', Ter f (Lam x u) e) -> do
       let v = mkVar k cs
       convM (k+1) cs (app u' v) (eval (oPair e (x,v)) u)
-    (Ter (Split p _) e, Ter (Split p' _) e') -> liftM ((p == p') &&) $ convEnv k cs e e'
-    (Ter (Sum p _) e,   Ter (Sum p' _) e')   -> ((p == p') &&) <$> convEnv k cs e e'
+    (Ter f (Split p _) e, Ter f' (Split p' _) e') -> pure (f == f' && p == p') <&&> convEnv k cs e e'
+    (Ter f (Sum p _) e,   Ter f' (Sum p' _) e')   -> pure (f == f' && p == p') <&&> convEnv k cs e e'
     (VPi u v, VPi u' v') -> do
       let w = mkVar k cs
       cv u u' <&&> convM (k+1) cs (app v w) (app v' w)

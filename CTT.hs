@@ -5,6 +5,7 @@ import Control.Applicative
 import Data.Traversable
 import Data.List
 import Pretty
+import Data.Monoid hiding (Sum)
 
 --------------------------------------------------------------------------------
 -- | Terms
@@ -194,8 +195,10 @@ subCtxt i (BinderCtxt _ _ c)          = subCtxt i c
 --------------------------------------------------------------------------------
 -- | Values
 
+type Projection = [Color]
+
 data Val = VU
-         | Ter Ter OEnv
+         | Ter Projection Ter OEnv
          | VPi Val Val
 
          | VSigma Val Val
@@ -236,7 +239,7 @@ unions = foldr union []
 
 instance Nominal Val where
   support VU              = []
-  support (Ter _ e)       = support e
+  support (Ter f _ e)     = support e \\ f
   support (VPi v1 v2)     = support [v1,v2]
   support (VCon _ vs)     = support vs
   support (VApp u v)      = support (u, v)
@@ -254,7 +257,7 @@ instance Nominal Val where
 
   swap u x y = case u of
     VU                           -> VU
-    Ter t e                      -> Ter t (swap e x y)
+    Ter f t e                    -> Ter (sw f) t (swap e x y)
     VPi a f                      -> VPi (sw a) (sw f)
     VCon c us                    -> VCon c (map sw us)
     VApp u v                     -> VApp (sw u) (sw v)
@@ -421,7 +424,7 @@ instance Show Val where
 showVal :: Val -> String
 showVal VU              = "U"
 showVal (VPi u v)       = "Pi" <+> showVals [u,v]
-showVal (Ter t env)     = show t <+> show env
+showVal (Ter f t env)   = (show t <+> show env) <> brack (ccat [show c <> "=0" | c <- f]) 
 showVal (VApp u v)      = showVal u <+> showVal1 v
 showVal (VAppName u n)  = showVal u <+> "@" <+> show n
 showVal (VSplit u v)    = showVal u <+> showVal1 v

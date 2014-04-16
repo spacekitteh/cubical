@@ -29,3 +29,7 @@ parens p  = "(" ++ p ++ ")"
 abrack :: String -> String
 abrack [] = ""
 abrack p  = "<" ++ p ++ ">"
+
+brack :: String -> String
+brack [] = ""
+brack p  = "[" ++ p ++ "]"

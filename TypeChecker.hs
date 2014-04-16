@@ -91,7 +91,7 @@ addC gam ((y,a):as,nu) ((x,u):xus) = do
 
 -- Extract the type of a label as a closure
 getLblType :: String -> Val -> Typing (Tele, OEnv)
-getLblType c (Ter (Sum _ cas) r) = case getIdent c cas of
+getLblType c (Ter _FIXME (Sum _ cas) r) = case getIdent c cas of
   Just as -> return (as,r)
   Nothing -> throwError ("getLblType " ++ show c)
 getLblType c u = throwError ("expected a data type for the constructor "
@@ -232,7 +232,7 @@ check a t = case (a,t) of
     a0 <- checkAndEval VU a
     local (addTypeVal (x,a0)) $ check VU b
   (VU,Sum _ bs) -> sequence_ [checkTele as | (_,as) <- bs]
-  (VPi (Ter (Sum _ cas) nu) f,Split _ ces) ->
+  (VPi (Ter _FIXME (Sum _ cas) nu) f,Split _ ces) ->
     if sort (map fst ces) == sort [n | ((n,_),_) <- cas]
        then sequence_ [ checkBranch (as,nu) f brc
                       | (brc, (_,as)) <- zip ces cas ]
