@@ -34,7 +34,7 @@ type LblSum = [(Binder,Tele)]
 data Ctxt   = EmptyCtxt
             | ColorCtxt Color Ctxt
             | BinderCtxt Binder Val Ctxt
-  deriving (Eq, Show)
+  deriving Show
 
 traverseSnds :: Applicative m => (a -> m b) -> [(c,a)] -> m [(c,b)]
 traverseSnds f = traverse (\(x,y) -> (x,) <$> f y)
@@ -69,12 +69,10 @@ data Ter = App Ter Ter
          | SPair Ter Ter
          | Fst Ter
          | Snd Ter
-         | ColoredSigma Color Ter Ter
          | ColoredPair Color Ter Ter
-         | ColoredFunPair Color Ter Ter
          | ColoredSnd Color Ter
-         | ColoredFst Color Ter -- 'face'
-         | Nabla Color Ter
+         -- | ColoredFst Color Ter -- 'face'
+         -- | Nabla Color Ter
          | Where Ter ODecls
          | Var Ident
          | U
@@ -195,38 +193,61 @@ subCtxt i (BinderCtxt _ _ c)          = subCtxt i c
 --------------------------------------------------------------------------------
 -- | Values
 
-type Projection = [Color]
+data Morphism = Morphism 
+  { support_of_morphism :: [Name]
+  , appMorName :: Name -> CVal }
+
+instance Nominal Morphism where
+  support f  = support_of_morphism f
+  swap f x y = Morphism (support ([x,y],f)) (\z -> swap (appMorName f z) x y)
+
+instance Eq Morphism where
+  (==) f g = all (\x -> appMorName f x == appMorName g x) (support (f,g))
+
+showCVal :: CVal -> String
+showCVal Nothing  = "0"
+showCVal (Just x) = show x
+
+instance Show Morphism where
+  show f = ccat [ show x ++ " -> " ++ showCVal (appMorName f x)
+                | x <- support f, appMorName f x /= Just x ]
+
+idMor :: Morphism
+idMor = Morphism [] Just
+
+compMor :: Morphism -> Morphism -> Morphism
+compMor f g = Morphism (support (f,g)) (\x -> appMorName g =<< appMorName f x)
+
+faceMor :: Name -> Morphism
+faceMor x = Morphism [x] (\_ -> Nothing)
 
 data Val = VU
-         | Ter Projection Ter OEnv
+         | Closure (Morphism -> Val -> Val)
+         | Ter Ter Morphism Env -- opaques
          | VPi Val Val
 
          | VSigma Val Val
          | VSPair Val Val
 
-         | VCSigma Color Val Val
          | VCSPair Color Val Val
-
-         | VCFPair Color Val Val
 
          | VCon Ident [Val]
 
          -- neutral values
          | VApp Val Val            -- the first Val must be neutral
-         | VAppName Val Name
+         -- | VAppName Val Name
          | VSplit Val Val          -- the second Val must be neutral
-         | VVar String Dim
+         | VVar String Morphism
          | VFst Val
          | VSnd Val
          | VCSnd Color Val
-  deriving Eq
 
-mkVar :: Int -> [Name] -> Val
-mkVar k ns = VVar ('X' : show k) (map Just ns)
+mkVar :: Int -> Morphism -> Val
+mkVar k f = VVar ('X' : show k) f
 
 isNeutral :: Val -> Bool
 isNeutral (VApp u _)     = isNeutral u
-isNeutral (VAppName u _) = isNeutral u
+-- isNeutral (VAppName u _) = isNeutral u
 isNeutral (VSplit _ v)   = isNeutral v
 isNeutral (VVar _ _)     = True
 isNeutral (VFst v)       = isNeutral v
@@ -237,47 +258,47 @@ isNeutral _              = False
 unions :: Eq a => [[a]] -> [a]
 unions = foldr union []
 
-instance Nominal Val where
-  support VU              = []
-  support (Ter f _ e)     = support e \\ f
-  support (VPi v1 v2)     = support [v1,v2]
-  support (VCon _ vs)     = support vs
-  support (VApp u v)      = support (u, v)
-  support (VAppName u n)  = support (u, n)
-  support (VSplit u v)    = support (u, v)
-  support (VVar _x d)     = support d
-  support (VSigma u v)    = support (u,v)
-  support (VSPair u v)    = support (u,v)
-  support (VCSigma i u v) = support (i,u,v)
-  support (VCSPair i u v) = support (i,u,v)
-  support (VFst u)        = support u
-  support (VSnd u)        = support u
-  support (VCSnd i u)     = delete i $ support u
-  -- support v               = error ("support " ++ show v)
+-- instance Nominal Val where
+--   support VU              = []
+--   support (Ter f)         = support e -- TODO: check
+--   support (VPi v1 v2)     = support [v1,v2]
+--   support (VCon _ vs)     = support vs
+--   support (VApp u v)      = support (u, v)
+--   support (VAppName u n)  = support (u, n)
+--   support (VSplit u v)    = support (u, v)
+--   support (VVar _x d)     = support d
+--   support (VSigma u v)    = support (u,v)
+--   support (VSPair u v)    = support (u,v)
+--   support (VCSigma i u v) = support (i,u,v)
+--   support (VCSPair i u v) = support (i,u,v)
+--   support (VFst u)        = support u
+--   support (VSnd u)        = support u
+--   support (VCSnd i u)     = delete i $ support u
+--   -- support v               = error ("support " ++ show v)
 
-  swap u x y = case u of
-    VU                           -> VU
-    Ter f t e                    -> Ter (sw f) t (swap e x y)
-    VPi a f                      -> VPi (sw a) (sw f)
-    VCon c us                    -> VCon c (map sw us)
-    VApp u v                     -> VApp (sw u) (sw v)
-    VAppName u n                 -> VAppName (sw u) (swap n x y)
-    VSplit u v                   -> VSplit (sw u) (sw v)
-    VVar s d                     -> VVar s (swap d x y)
-    VSigma u v                   -> VSigma (sw u) (sw v)
-    VSPair u v                   -> VSPair (sw u) (sw v)
-    VCSigma i u v                -> VCSigma (sw i) (sw u) (sw v)
-    VCSPair i u v                -> VCSPair (sw i) (sw u) (sw v)
-    VFst u                       -> VFst (sw u)
-    VSnd u                       -> VSnd (sw u)
-    VCSnd i u ->   VCSnd (sw i) (sw u)
+--   swap u x y = case u of
+--     VU                           -> VU
+--     Ter t f e                    -> Ter t (swap f x y) (swap e x y)
+--     VPi a f                      -> VPi (sw a) (sw f)
+--     VCon c us                    -> VCon c (map sw us)
+--     VApp u v                     -> VApp (sw u) (sw v)
+--     VAppName u n                 -> VAppName (sw u) (swap n x y)
+--     VSplit u v                   -> VSplit (sw u) (sw v)
+--     VVar s d                     -> VVar s (swap d x y)
+--     VSigma u v                   -> VSigma (sw u) (sw v)
+--     VSPair u v                   -> VSPair (sw u) (sw v)
+--     VCSigma i u v                -> VCSigma (sw i) (sw u) (sw v)
+--     VCSPair i u v                -> VCSPair (sw i) (sw u) (sw v)
+--     VFst u                       -> VFst (sw u)
+--     VSnd u                       -> VSnd (sw u)
+--     VCSnd i u ->   VCSnd (sw i) (sw u)
 
-    -- VCSnd no longer introduces a color. 
-    -- VCSnd z u | z /= x && z /= y -> VCSnd z (sw u)
-    --           | otherwise        -> let z' = fresh ([x, y], u)
-    --                                     v  = swap u z z'
-                                    -- in VCSnd z' (sw v)
-   where sw u = swap u x y
+--     -- VCSnd no longer introduces a color. 
+--     -- VCSnd z u | z /= x && z /= y -> VCSnd z (sw u)
+--     --           | otherwise        -> let z' = fresh ([x, y], u)
+--     --                                     v  = swap u z z'
+--                                     -- in VCSnd z' (sw v)
+--    where sw u = swap u x y
 
 
 --------------------------------------------------------------------------------
@@ -286,7 +307,7 @@ instance Nominal Val where
 data Env = Empty
          | Pair Env (Binder,Val)
          | PDef [(Binder,Ter)] Env
-  deriving Eq
+  -- deriving Eq
 
 instance Show Env where
   show Empty            = ""
@@ -296,38 +317,22 @@ instance Show Env where
       showEnv1 (Pair env (x,u)) = showEnv1 env ++ show u ++ ", "
       showEnv1 e                = show e
 
-instance Nominal Env where
-  swap e x y = mapEnv (\u -> swap u x y) e
+-- instance Nominal Env where
+--   swap e x y = mapEnv (\u -> swap u x y) e
 
-  support Empty          = []
-  support (Pair e (_,v)) = support (e, v)
-  support (PDef _ e)     = support e
+--   support Empty          = []
+--   support (Pair e (_,v)) = support (e, v)
+--   support (PDef _ e)     = support e
 
-data OEnv = OEnv { env     :: Env,
-                   opaques :: [Binder] }
-  deriving Eq
+oPDef :: Decls -> Env -> Env
+oPDef decls e = PDef [(x,d) | (x,_,d) <- decls] e
 
-oEmpty :: OEnv
-oEmpty = OEnv Empty []
+-- instance Nominal OEnv where
+--   swap (OEnv e s) x y = OEnv (swap e x y) s
+--   support (OEnv e s)  = support e
 
-oPair :: OEnv -> (Binder,Val) -> OEnv
-oPair (OEnv e o) u = OEnv (Pair e u) o
-
-oPDef :: Bool -> ODecls -> OEnv -> OEnv
-oPDef _    (ODecls decls)  (OEnv e o) = OEnv (PDef [(x,d) | (x,_,d) <- decls] e) o
-oPDef True (Opaque d)      (OEnv e o) = OEnv e (d:o)
-oPDef True (Transparent d) (OEnv e o) = OEnv e (d `delete` o)
-oPDef _ _ e = e
-
-instance Show OEnv where
-  show (OEnv e s) = show e -- <+> parens ("with opaque:" <+> ccat s)
-
-instance Nominal OEnv where
-  swap (OEnv e s) x y = OEnv (swap e x y) s
-  support (OEnv e s)  = support e
-
-upds :: OEnv -> [(Binder,Val)] -> OEnv
-upds = foldl oPair
+upds :: Env -> [(Binder,Val)] -> Env
+upds = foldl Pair
 
 lookupIdent :: Ident -> [(Binder,a)] -> Maybe (Binder, a)
 lookupIdent x defs = lookup x [(y,((y,l),t)) | ((y,l),t) <- defs]
@@ -354,19 +359,10 @@ mapEnvM _ Empty          = pure Empty
 mapEnvM f (Pair e (x,v)) = Pair <$> mapEnvM f e <*> ( (x,) <$> f v)
 mapEnvM f (PDef ts e)    = PDef ts <$> mapEnvM f e
 
-mapOEnv :: (Val -> Val) -> OEnv -> OEnv
-mapOEnv f (OEnv e o) = (OEnv (mapEnv f e) o)
-
-mapOEnvM :: Applicative m => (Val -> m Val) -> OEnv -> m OEnv
-mapOEnvM f (OEnv e o) = flip OEnv o <$> (mapEnvM f e)
-
 valOfEnv :: Env -> [Val]
 valOfEnv Empty            = []
 valOfEnv (Pair env (_,v)) = v : valOfEnv env
 valOfEnv (PDef _ env)     = valOfEnv env
-
-valOfOEnv :: OEnv -> [Val]
-valOfOEnv (OEnv e o) = valOfEnv e
 
 --------------------------------------------------------------------------------
 -- | Pretty printing
@@ -387,12 +383,9 @@ showTer (Fst e)                = showTer e ++ ".1"
 showTer (Snd e)                = showTer e ++ ".2"
 showTer (Sigma e0 e1)          = "Sigma" <+> showTers [e0,e1]
 showTer (SPair e0 e1)          = "pair" <+> showTers [e0,e1]
-showTer (Nabla i e)            = "Nabla" <+> show i ++ "." ++ showTer e
+-- showTer (Nabla i e)            = "Nabla" <+> show i ++ "." ++ showTer e
 showTer (ColoredSnd i e)       = showTer e ++ "." ++ show i
-showTer (ColoredFst i e)       = showTer e ++ "(" ++ show i ++ "=0)"
-showTer (ColoredSigma i e0 e1) = ("CSigma" ++ show i) <+> showTers [e0,e1]
 showTer (ColoredPair i e0 e1)  = ("Cpair" ++ show i) <+> showTers [e0,e1]
-showTer (ColoredFunPair i e0 e1)  = ("CFpair" ++ show i) <+> showTers [e0,e1]
 showTer (Where e d)            = showTer e <+> "where" <+> showODecls d
 showTer (Var x)                = x
 showTer (Con c es)             = c <+> showTers es
@@ -424,16 +417,15 @@ instance Show Val where
 showVal :: Val -> String
 showVal VU              = "U"
 showVal (VPi u v)       = "Pi" <+> showVals [u,v]
-showVal (Ter f t env)   = (show t <+> show env) <> brack (ccat [show c <> "=0" | c <- f]) 
+showVal (Closure f)         = "<closure>"
+showVal (Ter t f e)     = "Ter" <+> showTer t
 showVal (VApp u v)      = showVal u <+> showVal1 v
-showVal (VAppName u n)  = showVal u <+> "@" <+> show n
-showVal (VSplit u v)    = showVal u <+> showVal1 v
-showVal (VVar x d)      = x <+> showDim d
+-- showVal (VAppName u n)  = showVal u <+> "@" <+> show n
+showVal (VSplit u v)    = "VSplit" <+> showVal u <+> showVal v
+showVal (VVar x f)      = x <+> show f
 showVal (VSPair u v)    = "pair" <+> showVals [u,v]
 showVal (VSigma u v)    = "Sigma"<+> showVals [u,v]
 showVal (VCSPair i u v) = "Cpair" ++ show i  <+> showVals [u,v]
-showVal (VCFPair i u v) = "CFpair" ++ show i  <+> showVals [u,v]
-showVal (VCSigma i u v) = "CSigma"  ++ show i <+> showVals [u,v]
 showVal (VFst u)        = showVal u ++ ".1"
 showVal (VSnd u)        = showVal u ++ ".2"
 showVal (VCSnd i u)     = showVal u ++ "." ++ show i

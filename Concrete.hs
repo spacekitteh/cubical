@@ -170,18 +170,13 @@ resolveExp (Fun a b)    = bind C.Pi (AIdent ((0,0),"_"), a) (resolveExp b)
 resolveExp (Lam x xs t) = lams (x:xs) (resolveExp t)
 resolveExp (Fst t)      = C.Fst <$> resolveExp t
 resolveExp (Snd t)      = C.Snd <$> resolveExp t
-resolveExp (Nabla i t)  = do
-  i' <- resolveBinder i
-  local (insertCol i') $ C.Nabla <$> resolveCol i <*> resolveExp t
 resolveExp (CSnd t i)   = C.ColoredSnd <$> resolveCol i <*> resolveExp t
-resolveExp (CFst t i)   = C.ColoredFst <$> resolveCol i <*> resolveExp t
 resolveExp (CSigma t i b) = case pseudoTele [t] of
   Just tele -> do
     i' <- resolveCol i
-    binds (C.ColoredSigma i') tele (resolveExp b)
+    binds (C.ColoredPair i') tele (resolveExp b)
   Nothing   -> throwError "telescope malformed in colored Sigma"
 resolveExp (CPair t0 i t1) = C.ColoredPair <$> resolveCol i <*> resolveExp t0 <*>resolveExp t1
-resolveExp (CFPair t0 i t1) = C.ColoredFunPair <$> resolveCol i <*> resolveExp t0 <*>resolveExp t1
 resolveExp (Pair t0 t1) = C.SPair <$> resolveExp t0 <*> resolveExp t1
 resolveExp (Split brs)  = do
     brs' <- mapM resolveBranch brs

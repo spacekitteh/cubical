@@ -24,12 +24,12 @@ import Eval
 
 trace :: String -> Typing ()
 trace s = do
-  b <- getVerbose
+  b <- asks verbose
   if b then liftIO (putStrLn s) else return ()
 
 traceb :: String -> Typing ()
 traceb s = do
-  b <- getDebug
+  b <- asks debug
   if b then liftIO (putStrLn s) else return ()
 
 -- Type checking monad
@@ -39,7 +39,8 @@ runTyping :: Typing a -> TEnv -> IO (Either String a)
 runTyping t env = runErrorT $ runReaderT t env
 
 liftEval :: Eval v -> Typing v
-liftEval e = do d <- debug <$> ask; return $ runEval d e
+liftEval ev = do eenv <- EEnv <$> asks debug <*> asks mor <*> asks env <*> asks opaques
+                 return $ runEval eenv ev
 
 -- Used in the interaction loop
 runDecls :: TEnv -> ODecls -> IO (Either String TEnv)
@@ -58,66 +59,55 @@ runDeclss tenv (d:ds) = do
 runInfer :: TEnv -> Ter -> IO (Either String Val)
 runInfer lenv e = runTyping (checkInfer e) lenv
 
-eval :: OEnv -> Ter -> Typing Val
-eval env ter = do
-  b <- getDebug
-  return $ evalTer b env ter
-
-eval' :: Ter -> Typing Val
-eval' ter = do
-  e <- getOEnv
-  eval e ter
-
-app :: Val -> Val -> Typing Val
-app v1 v2 = do
-  b <- getDebug
-  return $ appVal b v1 v2
-
-evals :: OEnv -> [(Binder,Ter)] -> Typing [(Binder,Val)]
-evals rho t = do
-  b <- getDebug
-  return $ evalTers b rho t
-
-conv :: Int -> [Color] -> Val -> Val -> Typing Bool
-conv k cs v1 v2 = do
-  b <- getDebug
-  return $ convVal b k cs v1 v2
-
-addC :: Ctxt -> (Tele,OEnv) -> [(Binder,Val)] -> Typing Ctxt
-addC gam _             []          = return gam
-addC gam ((y,a):as,nu) ((x,u):xus) = do
-  v <- eval nu a
-  addC (BinderCtxt x v gam) (as,oPair nu (y,u)) xus
-
--- Extract the type of a label as a closure
-getLblType :: String -> Val -> Typing (Tele, OEnv)
-getLblType c (Ter _FIXME (Sum _ cas) r) = case getIdent c cas of
-  Just as -> return (as,r)
-  Nothing -> throwError ("getLblType " ++ show c)
-getLblType c u = throwError ("expected a data type for the constructor "
-                             ++ c ++ " but got " ++ show u)
-
 -- Environment for type checker
 data TEnv = TEnv { index   :: Int   -- for de Bruijn levels (for fresh variables)
-                 , oenv    :: OEnv
+                 , mor     :: Morphism
+                 , env     :: Env
+                 , opaques :: [Binder]
                  , ctxt    :: Ctxt
                  , verbose :: Bool  -- Should it be verbose and print
                                     -- what it typechecks?
                  , debug   :: Bool  -- Should the evaluator be run in
                                     -- debug mode?
                  }
-  deriving (Eq,Show)
 
 verboseEnv :: Bool -> TEnv
-verboseEnv debug = TEnv 0 oEmpty EmptyCtxt True debug
+verboseEnv debug = TEnv 0 idMor Empty EmptyCtxt True debug
 
 silentEnv :: TEnv
-silentEnv = TEnv 0 oEmpty EmptyCtxt False False
+silentEnv = TEnv 0 idMor Empty EmptyCtxt False False
+
+-- local modifiers
+inEnv :: Env -> EEnv -> EEnv 
+inEnv rho e = e {env = rho}
+
+addPairs :: [(Binder,Val)] -> EEnv -> EEnv
+addPairs xus e@(EEnv{..}) = e {env = foldl Pair env xus}
+
+addMor :: Morphism -> EEnv -> EEnv
+addMor f e@(EEnv{..}) = e {mor = compMor mor f}
+
+isOpaque :: Binder -> Eval Bool
+isOpaque x = elem x <$> asks opaques
+
+addC :: Ctxt -> (Tele,Env) -> [(Binder,Val)] -> Typing Ctxt
+addC gam _             []          = return gam
+addC gam ((y,a):as,nu) ((x,u):xus) = do
+  v <- local (inEnv nu) $ liftEval $ eval a
+  addC (BinderCtxt x v gam) (as, Pair nu (y,u)) xus
+
+-- Extract the type of a label as a closure
+getLblType :: String -> Val -> Typing (Tele, Env)
+getLblType c (Ter (Sum _ cas) _FIXME r) = case getIdent c cas of
+  Just as -> return (as,r)
+  Nothing -> throwError ("getLblType " ++ show c)
+getLblType c u = throwError ("expected a data type for the constructor "
+                             ++ c ++ " but got " ++ show u)
 
 addTypeAndVal :: Binder -> Val -> Val -> TEnv -> TEnv
 addTypeAndVal x typ val tenv@(TEnv {..}) =
  tenv { index = index + 1
-      , oenv = oPair oenv (x, val)
+      , env = Pair env (x, val)
       , ctxt = BinderCtxt x typ ctxt} 
 
 addTypeVal :: (Binder,Val) -> TEnv -> TEnv
@@ -126,27 +116,26 @@ addTypeVal p@(x,tx) tenv =
 
 addType :: (Binder,Ter) -> TEnv -> Typing TEnv
 addType (x,a) tenv@(TEnv _ rho _ _ _) = do
-  v <- eval rho a
+  v <- local (\e -> e {env = rho}) $ liftEval $ eval a
   return $ addTypeVal (x,v) tenv
 
 addColor :: Color -> TEnv -> TEnv
 addColor i tenv@(TEnv {..}) = tenv {ctxt = ColorCtxt i ctxt}
 
-modEnv :: (OEnv -> Typing OEnv) -> TEnv -> Typing TEnv
-modEnv f tenv = do fenv <- f (oenv tenv); return tenv {oenv = fenv}
+modEnv :: (Env -> Typing Env) -> TEnv -> Typing TEnv
+modEnv f tenv = do fenv <- f (env tenv); return tenv {env = fenv}
 
-addBranch :: [(Binder,Val)] -> (Tele,OEnv) -> TEnv -> Typing TEnv
+addBranch :: [(Binder,Val)] -> (Tele,Env) -> TEnv -> Typing TEnv
 addBranch nvs (tele,env) (TEnv k rho gam v d) = do
   e <- addC gam (tele,env) nvs
   return $ TEnv (k + length nvs) (upds rho nvs) e v d
 
-addDecls :: ODecls -> TEnv -> Typing TEnv
-addDecls od@(ODecls d) (TEnv k rho gam v b) = do
-  let rho1 = oPDef True od rho
-  es'  <- evals rho1 (declDefs d)
+addDecls :: ODecls -> Typing TEnv
+addDecls od@(ODecls d) = do
+  es'  <- local () $ liftEval $ evals (declDefs d)
   gam' <- addC gam (declTele d,rho) es'
   return $ TEnv k rho1 gam' v b
-addDecls od tenv = return $ tenv {oenv = oPDef True od (oenv tenv)}
+addDecls od tenv = return $ tenv {env = oPDef True od (env tenv)}
 
 addTele :: Tele -> TEnv -> Typing TEnv
 addTele xas lenv = foldM (flip addType) lenv xas
@@ -164,26 +153,11 @@ localM f r = do
   local (const a) r
 
 -- Getters:
-getIndex :: Typing Int
-getIndex = index <$> ask
-
-getDebug :: Typing Bool
-getDebug = debug <$> ask
-
-getVerbose :: Typing Bool
-getVerbose = verbose <$> ask
-
 getFresh :: Typing Val
 getFresh = do
-    k <- getIndex
-    e <- getOEnv
+    k <- asks index
+    e <- asks env
     return $ mkVar k (support e)
-
-getOEnv :: Typing OEnv
-getOEnv = oenv <$> ask
-
-getCtxt :: Typing Ctxt
-getCtxt = ctxt <$> ask
 
 checkDecls :: ODecls -> Typing ()
 checkDecls (ODecls d) =
@@ -191,7 +165,7 @@ checkDecls (ODecls d) =
   in do
     trace ("Checking definition: " ++ unwords idents)
     checkTele tele
-    rho <- getOEnv
+    rho <- asks env
     localM (addTele tele) $ checks (tele,rho) ters
 checkDecls _ = return ()
 
@@ -212,13 +186,11 @@ checkFace s@(i,d) v t = do
 checkAndEval :: Val -> Ter -> Typing Val
 checkAndEval a t = do
   check a t
-  eval' t
+  liftEval $ eval t
 
 check :: Val -> Ter -> Typing ()
 check a t = case (a,t) of
   (_,Undefined) -> return ()
-  (t, Nabla i a) -> do
-    local (addColor i) $ check t a -- Nabla is purely about scope checking (of colors).
   (_,Con c es) -> do
     (bs,nu) <- getLblType c a
     checks (bs,nu) es
@@ -228,7 +200,7 @@ check a t = case (a,t) of
   (VU,Sigma a (Lam x b)) -> do
     check VU a
     localM (addType (x,a)) $ check VU b
-  (VU,ColoredSigma i a (Lam x b)) -> local (subTEnv i) $ do
+  (VU,ColoredPair i a (Lam x b)) -> local (subTEnv i) $ do
     a0 <- checkAndEval VU a
     local (addTypeVal (x,a0)) $ check VU b
   (VU,Sum _ bs) -> sequence_ [checkTele as | (_,as) <- bs]
@@ -242,28 +214,28 @@ check a t = case (a,t) of
     local (addTypeVal (x,a)) $ checkM (app f var) t
   (VSigma a f, SPair t1 t2) -> do
     check a t1
-    e <- getOEnv
+    e <- asks env
     v <- eval e t1
     checkM (app f v) t2
-  (VCSigma x a f, ColoredPair y t1 t2) -> local (subTEnv x) $ do
+  (VCSPair x a f, ColoredPair y t1 t2) -> local (subTEnv x) $ do
     when (x /= y) $
       throwError $ "The dimension of the pair and sigma differ: "
                    ++ show x ++ " " ++ show y
     v <- checkAndEval a t1
     checkM (app f v) t2
-  (VPi (VCSigma i a f) g, ColoredFunPair j (Lam x t1) (Lam y (Lam z t2))) ->
+  (VPi (VCSPair i a f) g, ColoredPair j (Lam x t1) (Lam y (Lam z t2))) ->
       local (subTEnv i) $ do
         when (i /= j) $
              throwError $ "The dimension of the cfpair and csigma differ: "
                             ++ show i ++ " " ++ show j
-        c <- getCtxt
-        k <- getIndex
+        c <- asks ctxt
+        k <- asks index
         let u = mkVar k (ctxtColors c) 
         gu   <- app g u
         ui0  <- liftEval $ face u (i,0)
         fui0  <- app f ui0
         case gu of
-          VCSigma i' b h | i == i' -> do 
+          VCSPair i' b h | i == i' -> do 
             v1 <- local (addTypeAndVal x a ui0) $ checkAndEval b t1
             local (addTypeAndVal y a ui0) $
               local (addTypeAndVal z fui0 (VCSnd i u)) $
@@ -274,19 +246,19 @@ check a t = case (a,t) of
     localM (addDecls d) $ check a e
   _ -> do
     v <- checkInfer t
-    k <- getIndex
-    gam <- getCtxt
-    rho <- getOEnv
+    k <- asks index
+    gam <- asks ctxt
+    rho <- asks env
     b <- conv k (ctxtColors gam) v a
     unless b $
       throwError $ "check conv: the actual type of " ++ show t ++ ": \n       "
                  ++ show a ++ " is not convertible to the expected type " ++ show v
                  ++ "\n\nin  "  ++ show gam ++ "\nand\n  " ++ show rho
 
-checkBranch :: (Tele,OEnv) -> Val -> Brc -> Typing ()
+checkBranch :: (Tele,Env) -> Val -> Brc -> Typing ()
 checkBranch (xas,nu) f (c,(xs,e)) = do
-  k     <- getIndex
-  env   <- getOEnv
+  k     <- asks index
+  env   <- asks env
   let d  = support env
   let l  = length xas
   let us = map (`mkVar` d) [k..k+l-1]
@@ -296,7 +268,7 @@ checkInfer :: Ter -> Typing Val
 checkInfer e = case e of
   U -> return VU                 -- U : U
   Var n -> do
-    gam <- getCtxt
+    gam <- asks ctxt
     case lookupCtxt n gam of
       Just v  -> return v
       Nothing -> throwError $ show n ++ " is not declared!"
@@ -305,7 +277,7 @@ checkInfer e = case e of
     case c of
       VPi a f -> do
         check a u
-        rho <- getOEnv
+        rho <- asks env
         v   <- eval rho u
         app f v
       _       -> throwError $ show t ++ " has not a pi-type, but " ++ show c
@@ -318,37 +290,34 @@ checkInfer e = case e of
     c <- checkInfer t
     case c of
       VSigma a f -> do
-        e <- getOEnv
+        e <- asks env
         v <- eval e t
         app f (fstSVal v)
       _          -> throwError $ show c ++ " is not a sigma-type"
-  ColoredSnd x t -> do
-    c <- checkInfer t
+  ColoredSnd i t -> do
+    c <- local (addColor i) checkInfer t
     case c of
-      VCSigma y _a f -> do
-        when (x /= y) $ 
+      VCSPair j _a f -> do
+        when (i /= j) $ 
           throwError $ "The dimension of the pair and sigma differ: "
-                       ++ show x ++ " " ++ show y
-        v <- eval' t
-        vx0 <- liftEval $ face v (x,0)
-        app f vx0
+                       ++ show i ++ " " ++ show j
+        v <- liftEval $ eval t
+        vi0 <- liftEval $ face i v
+        app f vi0
       _          -> throwError $ show c ++ " is not a colored sigma-type"
-  ColoredFst x t -> do
-    c <- checkInfer t
-    liftEval $ face c (x,0)
   Where t d -> do
     checkDecls d
     localM (addDecls d) $ checkInfer t
   _ -> throwError ("checkInfer " ++ show e)
 
-checks :: (Tele,OEnv) -> [Ter] -> Typing ()
+checks :: (Tele,Env) -> [Ter] -> Typing ()
 checks _              []     = return ()
 checks ((x,a):xas,nu) (e:es) = do
   v <- eval nu a
   check v e
-  rho <- getOEnv
+  rho <- asks env
   v' <- eval rho e
-  checks (xas,oPair nu (x,v')) es
+  checks (xas, Pair nu (x,v')) es
 checks _              _      = throwError "checks"
 
 -- Not used since we have U : U
