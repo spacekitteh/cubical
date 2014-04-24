@@ -121,7 +121,7 @@ initLoop debug f = do
 
 -- The main loop
 loop :: FilePath -> [(C.Binder,SymKind)] -> TC.TEnv -> Interpreter ()
-loop f names tenv@(TC.TEnv _ rho _ _ debug) = do
+loop f names tenv@(TC.TEnv _ _ rho [] _ _ debug) = do
   input <- getInputLine defaultPrompt
   case input of
     Nothing    -> outputStrLn help >> loop f names tenv
@@ -146,7 +146,7 @@ loop f names tenv@(TC.TEnv _ rho _ _ debug) = do
             Left err -> do outputStrLn ("Could not type-check: " ++ err)
                            loop f names tenv
             Right _  -> do
-              let e = E.evalTer debug rho body
+              let e = E.runEval (E.EEnv debug C.idMor rho []) (E.eval body)
               outputStrLn ("EVAL: " ++ show e)
               loop f names tenv
 

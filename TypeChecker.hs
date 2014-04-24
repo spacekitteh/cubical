@@ -46,7 +46,7 @@ liftEval ev = do eenv <- EEnv <$> asks debug <*> asks mor <*> asks env <*> asks 
 runDecls :: TEnv -> ODecls -> IO (Either String TEnv)
 runDecls tenv d = flip runTyping tenv $ do
   checkDecls d
-  addDecls d tenv
+  addDecls d
 
 runDeclss :: TEnv -> [ODecls] -> IO (Maybe String,TEnv)
 runDeclss tenv []     = return $ (Nothing, tenv)
@@ -72,33 +72,33 @@ data TEnv = TEnv { index   :: Int   -- for de Bruijn levels (for fresh variables
                  }
 
 verboseEnv :: Bool -> TEnv
-verboseEnv debug = TEnv 0 idMor Empty EmptyCtxt True debug
+verboseEnv debug = TEnv 0 idMor Empty [] EmptyCtxt True debug
 
 silentEnv :: TEnv
-silentEnv = TEnv 0 idMor Empty EmptyCtxt False False
+silentEnv = TEnv 0 idMor Empty [] EmptyCtxt False False
 
 -- local modifiers
-inEnv :: Env -> EEnv -> EEnv 
+inEnv :: Env -> TEnv -> TEnv
 inEnv rho e = e {env = rho}
 
-addPairs :: [(Binder,Val)] -> EEnv -> EEnv
-addPairs xus e@(EEnv{..}) = e {env = foldl Pair env xus}
+addPairs :: [(Binder,Val)] -> TEnv -> TEnv
+addPairs xus e@(TEnv{..}) = e {env = foldl Pair env xus}
 
-addMor :: Morphism -> EEnv -> EEnv
-addMor f e@(EEnv{..}) = e {mor = compMor mor f}
+addMor :: Morphism -> TEnv -> TEnv
+addMor f e@(TEnv{..}) = e {mor = compMor mor f}
 
-isOpaque :: Binder -> Eval Bool
+isOpaque :: Binder -> Typing Bool
 isOpaque x = elem x <$> asks opaques
 
-addC :: Ctxt -> (Tele,Env) -> [(Binder,Val)] -> Typing Ctxt
-addC gam _             []          = return gam
-addC gam ((y,a):as,nu) ((x,u):xus) = do
+addC :: (Tele,Env) -> [(Binder,Val)] -> Ctxt -> Typing Ctxt
+addC _             []          gam = return gam
+addC ((y,a):as,nu) ((x,u):xus) gam = do
   v <- local (inEnv nu) $ liftEval $ eval a
-  addC (BinderCtxt x v gam) (as, Pair nu (y,u)) xus
+  addC (as, Pair nu (y,u)) xus  (BinderCtxt x v gam)
 
 -- Extract the type of a label as a closure
 getLblType :: String -> Val -> Typing (Tele, Env)
-getLblType c (Ter (Sum _ cas) _FIXME r) = case getIdent c cas of
+getLblType c (Ter (Sum _ cas) _f r) = case getIdent c cas of
   Just as -> return (as,r)
   Nothing -> throwError ("getLblType " ++ show c)
 getLblType c u = throwError ("expected a data type for the constructor "
@@ -108,16 +108,16 @@ addTypeAndVal :: Binder -> Val -> Val -> TEnv -> TEnv
 addTypeAndVal x typ val tenv@(TEnv {..}) =
  tenv { index = index + 1
       , env = Pair env (x, val)
-      , ctxt = BinderCtxt x typ ctxt} 
+      , ctxt = BinderCtxt x typ ctxt}
 
 addTypeVal :: (Binder,Val) -> TEnv -> TEnv
 addTypeVal p@(x,tx) tenv =
-   addTypeAndVal x tx (mkVar (index tenv) (ctxtColors (ctxt tenv))) tenv
+   addTypeAndVal x tx (mkVar (index tenv) (mor tenv)) tenv
 
-addType :: (Binder,Ter) -> TEnv -> Typing TEnv
-addType (x,a) tenv@(TEnv _ rho _ _ _) = do
-  v <- local (\e -> e {env = rho}) $ liftEval $ eval a
-  return $ addTypeVal (x,v) tenv
+addType :: (Binder,Ter) -> Typing TEnv
+addType (x,a) = do
+  v <- liftEval $ eval a
+  addTypeVal (x,v) <$> ask
 
 addColor :: Color -> TEnv -> TEnv
 addColor i tenv@(TEnv {..}) = tenv {ctxt = ColorCtxt i ctxt}
@@ -125,20 +125,29 @@ addColor i tenv@(TEnv {..}) = tenv {ctxt = ColorCtxt i ctxt}
 modEnv :: (Env -> Typing Env) -> TEnv -> Typing TEnv
 modEnv f tenv = do fenv <- f (env tenv); return tenv {env = fenv}
 
-addBranch :: [(Binder,Val)] -> (Tele,Env) -> TEnv -> Typing TEnv
-addBranch nvs (tele,env) (TEnv k rho gam v d) = do
-  e <- addC gam (tele,env) nvs
-  return $ TEnv (k + length nvs) (upds rho nvs) e v d
+addBranch :: [(Binder,Val)] -> (Tele,Env) -> Typing TEnv
+addBranch nvs (tele,env) = do
+  TEnv k f rho o gam v d <- ask
+  gam' <- addC (tele,env) nvs gam
+  return $ TEnv (k + length nvs) f (upds rho nvs) o gam' v d
 
 addDecls :: ODecls -> Typing TEnv
 addDecls od@(ODecls d) = do
-  es'  <- local () $ liftEval $ evals (declDefs d)
-  gam' <- addC gam (declTele d,rho) es'
-  return $ TEnv k rho1 gam' v b
-addDecls od tenv = return $ tenv {env = oPDef True od (env tenv)}
+  rho  <- PDef (declDefs d) <$> asks env
+  es'  <- local (inEnv rho) $ liftEval $ evals (declDefs d)
+  gam  <- addC (declTele d,rho) es' =<< asks ctxt
+  tenv <- ask
+  return $ tenv {env = rho, ctxt = gam}
+addDecls (Transparent d) = do
+    tenv <- ask
+    return $ tenv {opaques = delete d (opaques tenv)}
+addDecls (Opaque d)      = do
+    tenv <- ask
+    return $ tenv {opaques = d:(opaques tenv)}
 
-addTele :: Tele -> TEnv -> Typing TEnv
-addTele xas lenv = foldM (flip addType) lenv xas
+addTele :: Tele -> Typing TEnv
+addTele xas = do tenv <- ask
+                 foldM (\e xa -> local (const e) $ addType xa) tenv xas
 
 -- Useful monadic versions of functions:
 checkM :: Typing Val -> Ter -> Typing ()
@@ -146,18 +155,12 @@ checkM v t = do
   v' <- v
   check v' t
 
-localM :: (TEnv -> Typing TEnv) -> Typing a -> Typing a
-localM f r = do
-  e <- ask
-  a <- f e
-  local (const a) r
+localM :: Typing TEnv -> Typing a -> Typing a
+localM tenv x = do tenv' <- tenv; local (const tenv') x
 
 -- Getters:
 getFresh :: Typing Val
-getFresh = do
-    k <- asks index
-    e <- asks env
-    return $ mkVar k (support e)
+getFresh = mkVar <$> asks index <*> asks mor
 
 checkDecls :: ODecls -> Typing ()
 checkDecls (ODecls d) =
@@ -166,7 +169,8 @@ checkDecls (ODecls d) =
     trace ("Checking definition: " ++ unwords idents)
     checkTele tele
     rho <- asks env
-    localM (addTele tele) $ checks (tele,rho) ters
+    tenv' <- addTele tele
+    local (const tenv') $ checks (tele,rho) ters
 checkDecls _ = return ()
 
 checkTele :: Tele -> Typing ()
@@ -204,42 +208,41 @@ check a t = case (a,t) of
     a0 <- checkAndEval VU a
     local (addTypeVal (x,a0)) $ check VU b
   (VU,Sum _ bs) -> sequence_ [checkTele as | (_,as) <- bs]
-  (VPi (Ter _FIXME (Sum _ cas) nu) f,Split _ ces) ->
+  (VPi (Ter (Sum _ cas) _f nu) f,Split _ ces) ->
     if sort (map fst ces) == sort [n | ((n,_),_) <- cas]
        then sequence_ [ checkBranch (as,nu) f brc
                       | (brc, (_,as)) <- zip ces cas ]
        else throwError "case branches does not match the data type"
   (VPi a f,Lam x t)  -> do
     var <- getFresh
-    local (addTypeVal (x,a)) $ checkM (app f var) t
+    local (addTypeVal (x,a)) $ do
+       fvar <- liftEval $ app f var
+       check fvar t
   (VSigma a f, SPair t1 t2) -> do
     check a t1
-    e <- asks env
-    v <- eval e t1
-    checkM (app f v) t2
+    v <- liftEval $ eval t1
+    checkM (liftEval $ app f v) t2
   (VCSPair x a f, ColoredPair y t1 t2) -> local (subTEnv x) $ do
     when (x /= y) $
       throwError $ "The dimension of the pair and sigma differ: "
                    ++ show x ++ " " ++ show y
     v <- checkAndEval a t1
-    checkM (app f v) t2
+    checkM (liftEval $ app f v) t2
   (VPi (VCSPair i a f) g, ColoredPair j (Lam x t1) (Lam y (Lam z t2))) ->
       local (subTEnv i) $ do
         when (i /= j) $
              throwError $ "The dimension of the cfpair and csigma differ: "
                             ++ show i ++ " " ++ show j
-        c <- asks ctxt
-        k <- asks index
-        let u = mkVar k (ctxtColors c) 
-        gu   <- app g u
-        ui0  <- liftEval $ face u (i,0)
-        fui0  <- app f ui0
+        u <- mkVar <$> asks index <*> asks mor
+        gu   <- liftEval $ app g u
+        ui0  <- liftEval $ face i u
+        fui0  <- liftEval $ app f ui0
         case gu of
-          VCSPair i' b h | i == i' -> do 
+          VCSPair i' b h | i == i' -> do
             v1 <- local (addTypeAndVal x a ui0) $ checkAndEval b t1
             local (addTypeAndVal y a ui0) $
               local (addTypeAndVal z fui0 (VCSnd i u)) $
-                  checkM (app h v1) t2
+                  checkM (liftEval $ app h v1) t2
           _ -> throwError $ "check (funpair): " ++ show gu ++ " is not well formed"
   (_,Where e d) -> do
     checkDecls d
@@ -249,7 +252,8 @@ check a t = case (a,t) of
     k <- asks index
     gam <- asks ctxt
     rho <- asks env
-    b <- conv k (ctxtColors gam) v a
+    f   <- asks mor
+    b   <- liftEval $ conv k f v a
     unless b $
       throwError $ "check conv: the actual type of " ++ show t ++ ": \n       "
                  ++ show a ++ " is not convertible to the expected type " ++ show v
@@ -259,10 +263,11 @@ checkBranch :: (Tele,Env) -> Val -> Brc -> Typing ()
 checkBranch (xas,nu) f (c,(xs,e)) = do
   k     <- asks index
   env   <- asks env
-  let d  = support env
+  mor   <- asks mor
   let l  = length xas
-  let us = map (`mkVar` d) [k..k+l-1]
-  localM (addBranch (zip xs us) (xas,nu)) $ checkM (app f (VCon c us)) e
+  let us = map (`mkVar` mor) [k..k+l-1]
+  localM (addBranch (zip xs us) (xas,nu))
+    $ checkM (liftEval $ app f (VCon c us)) e
 
 checkInfer :: Ter -> Typing Val
 checkInfer e = case e of
@@ -277,9 +282,8 @@ checkInfer e = case e of
     case c of
       VPi a f -> do
         check a u
-        rho <- asks env
-        v   <- eval rho u
-        app f v
+        v   <- liftEval $ eval u
+        liftEval $ app f v
       _       -> throwError $ show t ++ " has not a pi-type, but " ++ show c
   Fst t -> do
     c <- checkInfer t
@@ -290,20 +294,19 @@ checkInfer e = case e of
     c <- checkInfer t
     case c of
       VSigma a f -> do
-        e <- asks env
-        v <- eval e t
-        app f (fstSVal v)
+        v <- liftEval $ eval t
+        liftEval $ app f (fstSVal v)
       _          -> throwError $ show c ++ " is not a sigma-type"
   ColoredSnd i t -> do
-    c <- local (addColor i) checkInfer t
+    c <- local (addColor i) $ checkInfer t
     case c of
       VCSPair j _a f -> do
-        when (i /= j) $ 
+        when (i /= j) $
           throwError $ "The dimension of the pair and sigma differ: "
                        ++ show i ++ " " ++ show j
         v <- liftEval $ eval t
         vi0 <- liftEval $ face i v
-        app f vi0
+        liftEval $ app f vi0
       _          -> throwError $ show c ++ " is not a colored sigma-type"
   Where t d -> do
     checkDecls d
@@ -313,10 +316,9 @@ checkInfer e = case e of
 checks :: (Tele,Env) -> [Ter] -> Typing ()
 checks _              []     = return ()
 checks ((x,a):xas,nu) (e:es) = do
-  v <- eval nu a
+  v <- local (inEnv nu) $ liftEval $ eval a
   check v e
-  rho <- asks env
-  v' <- eval rho e
+  v' <- liftEval $ eval e
   checks (xas, Pair nu (x,v')) es
 checks _              _      = throwError "checks"
 

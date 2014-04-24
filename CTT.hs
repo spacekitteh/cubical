@@ -324,8 +324,8 @@ instance Show Env where
 --   support (Pair e (_,v)) = support (e, v)
 --   support (PDef _ e)     = support e
 
-oPDef :: Decls -> Env -> Env
-oPDef decls e = PDef [(x,d) | (x,_,d) <- decls] e
+pDef :: Decls -> Env -> Env
+pDef decls e = PDef [(x,d) | (x,_,d) <- decls] e
 
 -- instance Nominal OEnv where
 --   swap (OEnv e s) x y = OEnv (swap e x y) s

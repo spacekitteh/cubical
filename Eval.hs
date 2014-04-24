@@ -42,7 +42,7 @@ data EEnv = EEnv { debug   :: Bool     -- Should the evaluator be run in
 type Eval a = ReaderT EEnv Identity a
 
 emptyEEnv :: Bool -> EEnv
-emptyEEnv d = EEnv d idMor Empty [] 
+emptyEEnv d = EEnv d idMor Empty []
 
 runEval :: EEnv -> Eval a -> a
 runEval e v = runIdentity $ runReaderT v e
@@ -56,14 +56,14 @@ look x = do r <- asks env
                               Just (y,t)  -> (y,) <$> eval t
                               Nothing     -> local (inEnv r1) $ look x
 
-inEnv :: Env -> EEnv -> EEnv 
+inEnv :: Env -> EEnv -> EEnv
 inEnv rho e = e {env = rho}
 
 addPairs :: [(Binder,Val)] -> EEnv -> EEnv
 addPairs xus e@(EEnv{..}) = e {env = foldl Pair env xus}
 
 addDecls :: Decls -> EEnv -> EEnv
-addDecls decls e@(EEnv{..}) = e {env = oPDef decls env}
+addDecls decls e@(EEnv{..}) = e {env = pDef decls env}
 
 addMor :: Morphism -> EEnv -> EEnv
 addMor f e@(EEnv{..}) = e {mor = compMor mor f}
@@ -79,7 +79,7 @@ eval (Var i)              = do
   x_opaque <- isOpaque x
   if x_opaque then VVar ("opaque_" ++ show x) <$> asks mor else return v
 eval (Pi a b)             = VPi <$> eval a <*> eval b
-eval (Lam x t) = do 
+eval (Lam x t) = do
   eenv <- ask
   return $ Closure $ \f u -> runEval (addMor f $ addPairs [(x,u)] $ eenv) $ eval t
 eval (Sigma a b)          = VSigma <$> eval a <*> eval b
@@ -225,7 +225,7 @@ conv k g v1 v2 =
     (VSplit u v,    VSplit u' v')   -> cv u u' <&&> cv v v'
     (VVar x d,      VVar x' d')     -> return $ (x == x')   && (d == d')
     _                               -> return False
-  
+
 -- Monadic version of conv
 convM :: Int -> Morphism -> Eval Val -> Eval Val -> Eval Bool
 convM k g v1 v2 = join $ liftM2 (conv k g) v1 v2
