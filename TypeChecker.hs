@@ -40,8 +40,8 @@ runTyping :: Typing a -> TEnv -> IO (Either String a)
 runTyping t env = runErrorT $ runReaderT t env
 
 liftEval :: Eval v -> Typing v
-liftEval ev = do eenv <- EEnv <$> asks debug 
-                              <*> (idMor <$> asks dom) 
+liftEval ev = do eenv <- EEnv <$> asks debug
+                              <*> (idMor <$> asks dom)
                               <*> asks env <*> asks opaques
                  return $ runEval eenv ev
 
@@ -75,10 +75,10 @@ data TEnv = TEnv { index   :: Int   -- for de Bruijn levels (for fresh variables
                  }
 
 verboseEnv :: Bool -> TEnv
-verboseEnv debug = TEnv 0 [] Empty [] EmptyCtxt True debug
+verboseEnv debug = TEnv 0 [] Empty [] [] True debug
 
 silentEnv :: TEnv
-silentEnv = TEnv 0 [] Empty [] EmptyCtxt False False
+silentEnv = TEnv 0 [] Empty [] [] False False
 
 -- local modifiers
 inEnv :: Env -> TEnv -> TEnv
@@ -94,7 +94,7 @@ addC :: (Tele,Env) -> [(Binder,Val)] -> Ctxt -> Typing Ctxt
 addC _             []          gam = return gam
 addC ((y,a):as,nu) ((x,u):xus) gam = do
   v <- local (inEnv nu) $ liftEval $ eval a
-  addC (as, Pair nu (y,u)) xus  (BinderCtxt x v gam)
+  addC (as, Pair nu (y,u)) xus ((x,v) : gam)
 
 -- Extract the type of a label as a closure
 getLblType :: String -> Val -> Typing (Tele, Env)
@@ -108,7 +108,7 @@ addTypeAndVal :: Binder -> Val -> Val -> TEnv -> TEnv
 addTypeAndVal x typ val tenv@(TEnv {..}) =
  tenv { index = index + 1
       , env = Pair env (x, val)
-      , ctxt = BinderCtxt x typ ctxt}
+      , ctxt = (x,typ) : ctxt }
 
 addTypeVal :: (Binder,Val) -> TEnv -> TEnv
 addTypeVal p@(x,tx) tenv =
@@ -178,13 +178,10 @@ checkTele ((x,a):xas) = do
   check VU a
   localM (addType (x,a)) $ checkTele xas
 
-subTEnv :: Name -> TEnv -> TEnv
-subTEnv i tenv = tenv {ctxt = subCtxt i (ctxt tenv)}
-
-checkFace :: Side -> Val -> Ter -> Typing Val
-checkFace s@(i,d) v t = do
-  ctx <- subCtxt i <$> asks ctxt
-  local (\e -> e {ctxt = ctx}) $ checkAndEval v t
+-- checkFace :: Side -> Val -> Ter -> Typing Val
+-- checkFace s@(i,d) v t = do
+--   ctx <- subCtxt i <$> asks ctxt
+--   local (\e -> e {ctxt = ctx}) $ checkAndEval v t
 
 checkAndEval :: Val -> Ter -> Typing Val
 checkAndEval a t = do
@@ -203,13 +200,19 @@ check a t = case (a,t) of
   (VU,Sigma a (Lam x b)) -> do
     check VU a
     localM (addType (x,a)) $ check VU b
-  (u,NamedPair i a (Lam x b)) -> do
+  (v,NamedPair i a p) -> do
     dom <- asks dom
     when (i `notElem` dom) $ throwError $
       "check: NamedPair " ++ show i ++ " not in domain " ++ show dom
-    ui0 <- liftEval $ face i u
-    a0 <- checkAndEval ui0 a
-    local (addTypeVal (x,a0)) $ check VU b
+    rho <- asks env
+    rhoi0 <- liftEval $ appMorEnv (faceMor dom i) rho
+    gam <- asks ctxt
+    gami0 <- sequenceSnd [ (x,liftEval (face i v)) | (x,v) <- gam ]
+    vi0 <- liftEval $ face i v
+    a' <- local (\e -> e{dom = delete i dom, env = rhoi0, ctxt = gami0}) $
+          checkAndEval vi0 a
+    local (\e -> e{dom = delete i dom, env = rhoi0, ctxt = gami0}) $
+      checkM (liftEval (app (predNSVal i v) a')) p
   (VU,Sum _ bs) -> sequence_ [checkTele as | (_,as) <- bs]
   (VPi (Ter (Sum _ cas) _f nu) f,Split _ ces) ->
     if sort (map fst ces) == sort [n | ((n,_),_) <- cas]
@@ -301,7 +304,7 @@ checkInfer e = case e of
       _          -> throwError $ show c ++ " is not a sigma-type"
   NamedSnd i t -> do
     dom <- asks dom
-    when (i `elem` dom) $ 
+    when (i `elem` dom) $
       throwError $ "The domain should not depend on " ++ show i
     c <- local (addName i) $ checkInfer t
     rho <- asks env

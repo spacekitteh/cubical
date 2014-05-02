@@ -153,7 +153,6 @@ appMorEnv f = mapEnvM (appMor f)
 -- faceCtxt :: Ctxt -> Side -> Eval Ctxt
 -- faceCtxt c xd = traverseSnds (`face` xd) c
 
-
 faceName :: EName -> Side -> EName
 faceName Nothing _ = Nothing
 faceName (Just x) (y,d) | x == y    = Nothing

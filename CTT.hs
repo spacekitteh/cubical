@@ -31,10 +31,7 @@ type Tele   = [(Binder,Ter)]
 type LblSum = [(Binder,Tele)]
 
 -- Context gives type values to identifiers
-data Ctxt   = EmptyCtxt
-            | NameCtxt  Name Ctxt
-            | BinderCtxt Binder Val Ctxt
-  deriving Show
+type Ctxt   = [(Binder,Val)]
 
 traverseSnds :: Applicative m => (a -> m b) -> [(c,a)] -> m [(c,b)]
 traverseSnds f = traverse (\(x,y) -> (x,) <$> f y)
@@ -179,17 +176,6 @@ sequenceSnd ((a,b):abs) = do
   b' <- b
   acs <- sequenceSnd abs
   return $ (a,b') : acs
-
-ctxtNames :: Ctxt -> [Name]
-ctxtNames EmptyCtxt          = []
-ctxtNames (NameCtxt i c)    = i : ctxtNames c
-ctxtNames (BinderCtxt _ _ c) = ctxtNames c
-
-subCtxt :: Name -> Ctxt -> Ctxt
-subCtxt i EmptyCtxt                   = EmptyCtxt
-subCtxt i (NameCtxt j c) | i == j    = c
-                          | otherwise = subCtxt i c
-subCtxt i (BinderCtxt _ _ c)          = subCtxt i c
 
 --------------------------------------------------------------------------------
 -- | Values
@@ -355,10 +341,9 @@ lookupIdent :: Ident -> [(Binder,a)] -> Maybe (Binder, a)
 lookupIdent x defs = lookup x [(y,((y,l),t)) | ((y,l),t) <- defs]
 
 lookupCtxt :: Ident -> Ctxt -> Maybe Val
-lookupCtxt _x EmptyCtxt = Nothing
-lookupCtxt x (NameCtxt i c) = lookupCtxt x c
-lookupCtxt x (BinderCtxt (y,_) v c) | x == y    = Just v
-                                    | otherwise = lookupCtxt x c
+lookupCtxt _x [] = Nothing
+lookupCtxt x (((y,_),v):c) | x == y    = Just v
+                           | otherwise = lookupCtxt x c
 
 getIdent :: Ident -> [(Binder,a)] -> Maybe a
 getIdent x defs = snd <$> lookupIdent x defs
