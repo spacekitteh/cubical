@@ -63,7 +63,7 @@ pseudoTele (PseudoTDecl exp typ : pd) = do
 -------------------------------------------------------------------------------
 -- | Resolver and environment
 
-data SymKind = Variable | Constructor | Color
+data SymKind = Variable | Constructor | Name
          deriving (Eq, Show)
 
 -- local environment for constructors
@@ -94,8 +94,8 @@ insertBinders = flip $ foldr insertBinder
 insertVar :: C.Binder -> Env -> Env
 insertVar x = insertBinder (x, Variable)
 
-insertCol :: C.Binder -> Env -> Env
-insertCol x = insertBinder (x, Color)
+insertName :: C.Binder -> Env -> Env
+insertName x = insertBinder (x, Name)
 
 insertVars :: [C.Binder] -> Env -> Env
 insertVars = flip $ foldr insertVar
@@ -121,12 +121,12 @@ getLoc l = do m <- getModule; return $ C.Loc m l
 resolveBinder :: AIdent -> Resolver C.Binder
 resolveBinder (AIdent (l,x)) = do l <- getLoc l; return (x, l)
 
-resolveCol :: AIdent -> Resolver C.Color
-resolveCol (AIdent (l,x)) = do
+resolveName :: AIdent -> Resolver C.Name
+resolveName (AIdent (l,x)) = do
     modName <- getModule
     vars    <- getVariables
     case C.getIdent x vars of
-      Just Color    -> return $ C.N x
+      Just Name    -> return $ C.N x
       _    -> throwError $
         "Cannot resolve color " ++ x ++ " at position " ++ show l
         ++ " in module " ++ modName
@@ -170,13 +170,13 @@ resolveExp (Fun a b)    = bind C.Pi (AIdent ((0,0),"_"), a) (resolveExp b)
 resolveExp (Lam x xs t) = lams (x:xs) (resolveExp t)
 resolveExp (Fst t)      = C.Fst <$> resolveExp t
 resolveExp (Snd t)      = C.Snd <$> resolveExp t
-resolveExp (CSnd t i)   = C.ColoredSnd <$> resolveCol i <*> resolveExp t
+resolveExp (CSnd t i)   = C.NamedSnd <$> resolveName i <*> resolveExp t
 resolveExp (CSigma t i b) = case pseudoTele [t] of
   Just tele -> do
-    i' <- resolveCol i
-    binds (C.ColoredPair i') tele (resolveExp b)
+    i' <- resolveName i
+    binds (C.NamedPair i') tele (resolveExp b)
   Nothing   -> throwError "telescope malformed in colored Sigma"
-resolveExp (CPair t0 i t1) = C.ColoredPair <$> resolveCol i <*> resolveExp t0 <*>resolveExp t1
+resolveExp (CPair t0 i t1) = C.NamedPair <$> resolveName i <*> resolveExp t0 <*>resolveExp t1
 resolveExp (Pair t0 t1) = C.SPair <$> resolveExp t0 <*> resolveExp t1
 resolveExp (Split brs)  = do
     brs' <- mapM resolveBranch brs
