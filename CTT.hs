@@ -32,7 +32,7 @@ type LblSum = [(Binder,Tele)]
 
 -- Context gives type values to identifiers
 data Ctxt   = EmptyCtxt
-            | ColorCtxt Color Ctxt
+            | NameCtxt  Name Ctxt
             | BinderCtxt Binder Val Ctxt
   deriving Show
 
@@ -69,10 +69,10 @@ data Ter = App Ter Ter
          | SPair Ter Ter
          | Fst Ter
          | Snd Ter
-         | ColoredPair Color Ter Ter
-         | ColoredSnd Color Ter
-         -- | ColoredFst Color Ter -- 'face'
-         -- | Nabla Color Ter
+         | NamedPair Name Ter Ter
+         | NamedSnd Name Ter
+         -- | NamedFst Name Ter -- 'face'
+         -- | Nabla Name Ter
          | Where Ter ODecls
          | Var Ident
          | U
@@ -113,14 +113,15 @@ mkWheres (d:ds) e = Where (mkWheres ds e) d
 -- type Name = Integer
 newtype Name = N String
   deriving (Eq,Ord)
-type Color = Name
 
 instance Show Name where
   show (N s) = s
 
-type Dim = [CVal]
-type CVal = Maybe Color
-  
+type Dim = [EName]
+-- data I   = IFace | IName Name 
+--   deriving (Eq, Show)
+type EName = Maybe Name
+
 allStrings :: [String]
 allStrings = [] : [x:s | s <- allStrings, x <- ['a'..'z']]
 
@@ -179,14 +180,14 @@ sequenceSnd ((a,b):abs) = do
   acs <- sequenceSnd abs
   return $ (a,b') : acs
 
-ctxtColors :: Ctxt -> [Color]
-ctxtColors EmptyCtxt          = []
-ctxtColors (ColorCtxt i c)    = i : ctxtColors c
-ctxtColors (BinderCtxt _ _ c) = ctxtColors c
+ctxtNames :: Ctxt -> [Name]
+ctxtNames EmptyCtxt          = []
+ctxtNames (NameCtxt i c)    = i : ctxtNames c
+ctxtNames (BinderCtxt _ _ c) = ctxtNames c
 
-subCtxt :: Color -> Ctxt -> Ctxt
+subCtxt :: Name -> Ctxt -> Ctxt
 subCtxt i EmptyCtxt                   = EmptyCtxt
-subCtxt i (ColorCtxt j c) | i == j    = c
+subCtxt i (NameCtxt j c) | i == j    = c
                           | otherwise = subCtxt i c
 subCtxt i (BinderCtxt _ _ c)          = subCtxt i c
 
@@ -194,42 +195,57 @@ subCtxt i (BinderCtxt _ _ c)          = subCtxt i c
 -- | Values
 
 data Morphism = Morphism 
-  { support_of_morphism :: [Name]
-  , appMorName :: Name -> CVal }
+  { domain     :: [Name]
+  , codomain   :: [Name]
+  , appMorName :: Name -> EName }
 
-instance Nominal Morphism where
-  support f  = support_of_morphism f
-  swap f x y = Morphism (support ([x,y],f)) (\z -> swap (appMorName f z) x y)
+-- instance Nominal Morphism where
+--   support f  = support_of_morphism f
+--   swap f x y = Morphism (support ([x,y],f)) (\z -> swap (appMorName f z) x y)
 
 instance Eq Morphism where
-  (==) f g = all (\x -> appMorName f x == appMorName g x) (support (f,g))
+  (==) f g = (sort (nub (domain f))) == (sort (nub (domain g)))
+             && all (\x -> appMorName f x == appMorName g x) (domain f)
 
-showCVal :: CVal -> String
-showCVal Nothing  = "0"
-showCVal (Just x) = show x
+showEName :: EName -> String
+showEName Nothing  = "0"
+showEName (Just x) = show x
 
 instance Show Morphism where
-  show f = ccat [ show x ++ " -> " ++ showCVal (appMorName f x)
-                | x <- support f, appMorName f x /= Just x ]
+  show f = ccat [ show x ++ " -> " ++ showEName (appMorName f x)
+                | x <- domain f, appMorName f x /= Just x ]
 
-idMor :: Morphism
-idMor = Morphism [] Just
+idMor :: [Name] -> Morphism
+idMor domain = Morphism domain domain Just
 
+-- Composition in diagramatic order
 compMor :: Morphism -> Morphism -> Morphism
-compMor f g = Morphism (support (f,g)) (\x -> appMorName g =<< appMorName f x)
+compMor f g
+  | codomain f == domain g =
+    Morphism (domain f) (codomain g)
+             (\x -> appMorName g =<< appMorName f x)
+  | otherwise = error "compMor: 'codomain f' and 'domain g' do not match"
 
-faceMor :: Name -> Morphism
-faceMor x = Morphism [x] (\_ -> Nothing)
+-- face morphism, i should be in the domain
+faceMor :: [Name] -> Name -> Morphism
+faceMor domain i
+  | i `elem` domain =
+     Morphism domain (i `delete` domain)
+       (\j -> if i == j then Nothing else Just j)
+  | otherwise       = error $ "faceMor: " ++ show i ++ " not in domain"
+
+-- swapMor :: [Name] -> Name -> Name -> Morphism
+-- swapMor domain i j = Morphism domain (\k -> ) 
 
 data Val = VU
-         | Closure (Morphism -> Val -> Val)
-         | Ter Ter Morphism Env -- opaques
+         | Closure [Name] (Morphism -> Val -> Val)
+         | Ter Ter Morphism Env -- for Sum
          | VPi Val Val
 
          | VSigma Val Val
          | VSPair Val Val
 
-         | VCSPair Color Val Val
+         | VNSPair Name Val Val
 
          | VCon Ident [Val]
 
@@ -237,10 +253,11 @@ data Val = VU
          | VApp Val Val            -- the first Val must be neutral
          -- | VAppName Val Name
          | VSplit Val Val          -- the second Val must be neutral
-         | VVar String Morphism
          | VFst Val
          | VSnd Val
-         | VCSnd Color Val
+         | VNSnd Name Val
+
+         | VVar String Morphism
 
 mkVar :: Int -> Morphism -> Val
 mkVar k f = VVar ('X' : show k) f
@@ -252,7 +269,7 @@ isNeutral (VSplit _ v)   = isNeutral v
 isNeutral (VVar _ _)     = True
 isNeutral (VFst v)       = isNeutral v
 isNeutral (VSnd v)       = isNeutral v
-isNeutral (VCSnd _i v)   = isNeutral v
+isNeutral (VNSnd _i v)   = isNeutral v
 isNeutral _              = False
 
 unions :: Eq a => [[a]] -> [a]
@@ -269,11 +286,11 @@ unions = foldr union []
 --   support (VVar _x d)     = support d
 --   support (VSigma u v)    = support (u,v)
 --   support (VSPair u v)    = support (u,v)
---   support (VCSigma i u v) = support (i,u,v)
---   support (VCSPair i u v) = support (i,u,v)
+--   support (VNSigma i u v) = support (i,u,v)
+--   support (VNSPair i u v) = support (i,u,v)
 --   support (VFst u)        = support u
 --   support (VSnd u)        = support u
---   support (VCSnd i u)     = delete i $ support u
+--   support (VNSnd i u)     = delete i $ support u
 --   -- support v               = error ("support " ++ show v)
 
 --   swap u x y = case u of
@@ -287,17 +304,17 @@ unions = foldr union []
 --     VVar s d                     -> VVar s (swap d x y)
 --     VSigma u v                   -> VSigma (sw u) (sw v)
 --     VSPair u v                   -> VSPair (sw u) (sw v)
---     VCSigma i u v                -> VCSigma (sw i) (sw u) (sw v)
---     VCSPair i u v                -> VCSPair (sw i) (sw u) (sw v)
+--     VNSigma i u v                -> VNSigma (sw i) (sw u) (sw v)
+--     VNSPair i u v                -> VNSPair (sw i) (sw u) (sw v)
 --     VFst u                       -> VFst (sw u)
 --     VSnd u                       -> VSnd (sw u)
---     VCSnd i u ->   VCSnd (sw i) (sw u)
+--     VNSnd i u ->   VNSnd (sw i) (sw u)
 
---     -- VCSnd no longer introduces a color. 
---     -- VCSnd z u | z /= x && z /= y -> VCSnd z (sw u)
+--     -- VNSnd no longer introduces a color. 
+--     -- VNSnd z u | z /= x && z /= y -> VNSnd z (sw u)
 --     --           | otherwise        -> let z' = fresh ([x, y], u)
 --     --                                     v  = swap u z z'
---                                     -- in VCSnd z' (sw v)
+--                                     -- in VNSnd z' (sw v)
 --    where sw u = swap u x y
 
 
@@ -339,7 +356,7 @@ lookupIdent x defs = lookup x [(y,((y,l),t)) | ((y,l),t) <- defs]
 
 lookupCtxt :: Ident -> Ctxt -> Maybe Val
 lookupCtxt _x EmptyCtxt = Nothing
-lookupCtxt x (ColorCtxt i c) = lookupCtxt x c
+lookupCtxt x (NameCtxt i c) = lookupCtxt x c
 lookupCtxt x (BinderCtxt (y,_) v c) | x == y    = Just v
                                     | otherwise = lookupCtxt x c
 
@@ -384,8 +401,8 @@ showTer (Snd e)                = showTer e ++ ".2"
 showTer (Sigma e0 e1)          = "Sigma" <+> showTers [e0,e1]
 showTer (SPair e0 e1)          = "pair" <+> showTers [e0,e1]
 -- showTer (Nabla i e)            = "Nabla" <+> show i ++ "." ++ showTer e
-showTer (ColoredSnd i e)       = showTer e ++ "." ++ show i
-showTer (ColoredPair i e0 e1)  = ("Cpair" ++ show i) <+> showTers [e0,e1]
+showTer (NamedSnd i e)         = showTer e ++ "." ++ show i
+showTer (NamedPair i e0 e1)    = ("Cpair" ++ show i) <+> showTers [e0,e1]
 showTer (Where e d)            = showTer e <+> "where" <+> showODecls d
 showTer (Var x)                = x
 showTer (Con c es)             = c <+> showTers es
@@ -417,7 +434,7 @@ instance Show Val where
 showVal :: Val -> String
 showVal VU              = "U"
 showVal (VPi u v)       = "Pi" <+> showVals [u,v]
-showVal (Closure f)         = "<closure>"
+showVal (Closure _i _f) = "<closure>"
 showVal (Ter t f e)     = "Ter" <+> showTer t
 showVal (VApp u v)      = showVal u <+> showVal1 v
 -- showVal (VAppName u n)  = showVal u <+> "@" <+> show n
@@ -425,10 +442,10 @@ showVal (VSplit u v)    = "VSplit" <+> showVal u <+> showVal v
 showVal (VVar x f)      = x <+> show f
 showVal (VSPair u v)    = "pair" <+> showVals [u,v]
 showVal (VSigma u v)    = "Sigma"<+> showVals [u,v]
-showVal (VCSPair i u v) = "Cpair" ++ show i  <+> showVals [u,v]
+showVal (VNSPair i u v) = "Cpair" ++ show i  <+> showVals [u,v]
 showVal (VFst u)        = showVal u ++ ".1"
 showVal (VSnd u)        = showVal u ++ ".2"
-showVal (VCSnd i u)     = showVal u ++ "." ++ show i
+showVal (VNSnd i u)     = showVal u ++ "." ++ show i
 
 showDim :: Show a => [a] -> String
 showDim = parens . ccat . map show

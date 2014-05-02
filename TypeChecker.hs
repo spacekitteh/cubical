@@ -21,6 +21,7 @@ import Pretty
 
 import CTT
 import Eval
+import qualified Eval as E
 
 trace :: String -> Typing ()
 trace s = do
@@ -39,7 +40,9 @@ runTyping :: Typing a -> TEnv -> IO (Either String a)
 runTyping t env = runErrorT $ runReaderT t env
 
 liftEval :: Eval v -> Typing v
-liftEval ev = do eenv <- EEnv <$> asks debug <*> asks mor <*> asks env <*> asks opaques
+liftEval ev = do eenv <- EEnv <$> asks debug 
+                              <*> (idMor <$> asks dom) 
+                              <*> asks env <*> asks opaques
                  return $ runEval eenv ev
 
 -- Used in the interaction loop
@@ -61,7 +64,7 @@ runInfer lenv e = runTyping (checkInfer e) lenv
 
 -- Environment for type checker
 data TEnv = TEnv { index   :: Int   -- for de Bruijn levels (for fresh variables)
-                 , mor     :: Morphism
+                 , dom     :: [Name]
                  , env     :: Env
                  , opaques :: [Binder]
                  , ctxt    :: Ctxt
@@ -72,10 +75,10 @@ data TEnv = TEnv { index   :: Int   -- for de Bruijn levels (for fresh variables
                  }
 
 verboseEnv :: Bool -> TEnv
-verboseEnv debug = TEnv 0 idMor Empty [] EmptyCtxt True debug
+verboseEnv debug = TEnv 0 [] Empty [] EmptyCtxt True debug
 
 silentEnv :: TEnv
-silentEnv = TEnv 0 idMor Empty [] EmptyCtxt False False
+silentEnv = TEnv 0 [] Empty [] EmptyCtxt False False
 
 -- local modifiers
 inEnv :: Env -> TEnv -> TEnv
@@ -83,9 +86,6 @@ inEnv rho e = e {env = rho}
 
 addPairs :: [(Binder,Val)] -> TEnv -> TEnv
 addPairs xus e@(TEnv{..}) = e {env = foldl Pair env xus}
-
-addMor :: Morphism -> TEnv -> TEnv
-addMor f e@(TEnv{..}) = e {mor = compMor mor f}
 
 isOpaque :: Binder -> Typing Bool
 isOpaque x = elem x <$> asks opaques
@@ -112,15 +112,15 @@ addTypeAndVal x typ val tenv@(TEnv {..}) =
 
 addTypeVal :: (Binder,Val) -> TEnv -> TEnv
 addTypeVal p@(x,tx) tenv =
-   addTypeAndVal x tx (mkVar (index tenv) (mor tenv)) tenv
+   addTypeAndVal x tx (mkVar (index tenv) (idMor (dom tenv))) tenv
 
 addType :: (Binder,Ter) -> Typing TEnv
 addType (x,a) = do
   v <- liftEval $ eval a
   addTypeVal (x,v) <$> ask
 
-addColor :: Color -> TEnv -> TEnv
-addColor i tenv@(TEnv {..}) = tenv {ctxt = ColorCtxt i ctxt}
+addName :: Name -> TEnv -> TEnv
+addName i tenv@(TEnv {..}) = tenv {dom = i : dom}
 
 modEnv :: (Env -> Typing Env) -> TEnv -> Typing TEnv
 modEnv f tenv = do fenv <- f (env tenv); return tenv {env = fenv}
@@ -160,17 +160,16 @@ localM tenv x = do tenv' <- tenv; local (const tenv') x
 
 -- Getters:
 getFresh :: Typing Val
-getFresh = mkVar <$> asks index <*> asks mor
+getFresh = mkVar <$> asks index <*> (idMor <$> (asks dom))
 
 checkDecls :: ODecls -> Typing ()
-checkDecls (ODecls d) =
+checkDecls (ODecls d) = do
   let (idents, tele, ters) = (declIdents d, declTele d, declTers d)
-  in do
-    trace ("Checking definition: " ++ unwords idents)
-    checkTele tele
-    rho <- asks env
-    tenv' <- addTele tele
-    local (const tenv') $ checks (tele,rho) ters
+  trace ("Checking definition: " ++ unwords idents)
+  checkTele tele
+  rho <- asks env
+  tenv' <- addTele tele
+  local (const tenv') $ checks (tele,rho) ters
 checkDecls _ = return ()
 
 checkTele :: Tele -> Typing ()
@@ -179,7 +178,7 @@ checkTele ((x,a):xas) = do
   check VU a
   localM (addType (x,a)) $ checkTele xas
 
-subTEnv :: Color -> TEnv -> TEnv
+subTEnv :: Name -> TEnv -> TEnv
 subTEnv i tenv = tenv {ctxt = subCtxt i (ctxt tenv)}
 
 checkFace :: Side -> Val -> Ter -> Typing Val
@@ -204,8 +203,12 @@ check a t = case (a,t) of
   (VU,Sigma a (Lam x b)) -> do
     check VU a
     localM (addType (x,a)) $ check VU b
-  (VU,ColoredPair i a (Lam x b)) -> local (subTEnv i) $ do
-    a0 <- checkAndEval VU a
+  (u,NamedPair i a (Lam x b)) -> do
+    dom <- asks dom
+    when (i `notElem` dom) $ throwError $
+      "check: NamedPair " ++ show i ++ " not in domain " ++ show dom
+    ui0 <- liftEval $ face i u
+    a0 <- checkAndEval ui0 a
     local (addTypeVal (x,a0)) $ check VU b
   (VU,Sum _ bs) -> sequence_ [checkTele as | (_,as) <- bs]
   (VPi (Ter (Sum _ cas) _f nu) f,Split _ ces) ->
@@ -222,28 +225,28 @@ check a t = case (a,t) of
     check a t1
     v <- liftEval $ eval t1
     checkM (liftEval $ app f v) t2
-  (VCSPair x a f, ColoredPair y t1 t2) -> local (subTEnv x) $ do
-    when (x /= y) $
-      throwError $ "The dimension of the pair and sigma differ: "
-                   ++ show x ++ " " ++ show y
-    v <- checkAndEval a t1
-    checkM (liftEval $ app f v) t2
-  (VPi (VCSPair i a f) g, ColoredPair j (Lam x t1) (Lam y (Lam z t2))) ->
-      local (subTEnv i) $ do
-        when (i /= j) $
-             throwError $ "The dimension of the cfpair and csigma differ: "
-                            ++ show i ++ " " ++ show j
-        u <- mkVar <$> asks index <*> asks mor
-        gu   <- liftEval $ app g u
-        ui0  <- liftEval $ face i u
-        fui0  <- liftEval $ app f ui0
-        case gu of
-          VCSPair i' b h | i == i' -> do
-            v1 <- local (addTypeAndVal x a ui0) $ checkAndEval b t1
-            local (addTypeAndVal y a ui0) $
-              local (addTypeAndVal z fui0 (VCSnd i u)) $
-                  checkM (liftEval $ app h v1) t2
-          _ -> throwError $ "check (funpair): " ++ show gu ++ " is not well formed"
+  -- (VNSPair x a f, NamedPair y t1 t2) -> local (subTEnv x) $ do
+  --   when (x /= y) $
+  --     throwError $ "The dimension of the pair and sigma differ: "
+  --                  ++ show x ++ " " ++ show y
+  --   v <- checkAndEval a t1
+  --   checkM (liftEval $ app f v) t2
+  -- (VPi (VNSPair i a f) g, NamedPair j (Lam x t1) (Lam y (Lam z t2))) ->
+  --     local (subTEnv i) $ do
+  --       when (i /= j) $
+  --            throwError $ "The dimension of the cfpair and csigma differ: "
+  --                           ++ show i ++ " " ++ show j
+  --       u     <- getFresh
+  --       gu    <- liftEval $ app g u
+  --       ui0   <- liftEval $ face i u
+  --       fui0  <- liftEval $ app f ui0
+  --       case gu of
+  --         VNSPair i' b h | i == i' -> do
+  --           v1 <- local (addTypeAndVal x a ui0) $ checkAndEval b t1
+  --           local (addTypeAndVal y a ui0) $
+  --             local (addTypeAndVal z fui0 (VNSnd i u)) $
+  --                 checkM (liftEval $ app h v1) t2
+  --         _ -> throwError $ "check (funpair): " ++ show gu ++ " is not well formed"
   (_,Where e d) -> do
     checkDecls d
     localM (addDecls d) $ check a e
@@ -252,20 +255,20 @@ check a t = case (a,t) of
     k <- asks index
     gam <- asks ctxt
     rho <- asks env
-    f   <- asks mor
-    b   <- liftEval $ conv k f v a
+    dom <- asks dom
+    b   <- liftEval $ conv k v a
     unless b $
       throwError $ "check conv: the actual type of " ++ show t ++ ": \n       "
                  ++ show a ++ " is not convertible to the expected type " ++ show v
-                 ++ "\n\nin  "  ++ show gam ++ "\nand\n  " ++ show rho
+                 ++ "\n\nin  "  ++ show gam ++ "\nand\n  " ++ show dom
 
 checkBranch :: (Tele,Env) -> Val -> Brc -> Typing ()
 checkBranch (xas,nu) f (c,(xs,e)) = do
   k     <- asks index
   env   <- asks env
-  mor   <- asks mor
+  dom   <- asks dom
   let l  = length xas
-  let us = map (`mkVar` mor) [k..k+l-1]
+  let us = map (`mkVar` (idMor dom)) [k..k+l-1]
   localM (addBranch (zip xs us) (xas,nu))
     $ checkM (liftEval $ app f (VCon c us)) e
 
@@ -281,8 +284,7 @@ checkInfer e = case e of
     c <- checkInfer t
     case c of
       VPi a f -> do
-        check a u
-        v   <- liftEval $ eval u
+        v <- checkAndEval a u
         liftEval $ app f v
       _       -> throwError $ show t ++ " has not a pi-type, but " ++ show c
   Fst t -> do
@@ -297,17 +299,15 @@ checkInfer e = case e of
         v <- liftEval $ eval t
         liftEval $ app f (fstSVal v)
       _          -> throwError $ show c ++ " is not a sigma-type"
-  ColoredSnd i t -> do
-    c <- local (addColor i) $ checkInfer t
-    case c of
-      VCSPair j _a f -> do
-        when (i /= j) $
-          throwError $ "The dimension of the pair and sigma differ: "
-                       ++ show i ++ " " ++ show j
-        v <- liftEval $ eval t
-        vi0 <- liftEval $ face i v
-        liftEval $ app f vi0
-      _          -> throwError $ show c ++ " is not a colored sigma-type"
+  NamedSnd i t -> do
+    dom <- asks dom
+    when (i `elem` dom) $ 
+      throwError $ "The domain should not depend on " ++ show i
+    c <- local (addName i) $ checkInfer t
+    rho <- asks env
+    rho' <- liftEval $ appMorEnv (faceMor (i:dom) i) rho
+    tvi0 <- local (inEnv rho') $ liftEval $ eval t
+    liftEval $ app (predNSVal i c) tvi0
   Where t d -> do
     checkDecls d
     localM (addDecls d) $ checkInfer t
