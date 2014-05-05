@@ -73,7 +73,7 @@ isOpaque :: Binder -> Eval Bool
 isOpaque x = elem x <$> asks opaques
 
 eval :: Ter -> Eval Val
-eval U                    = return VU
+eval U                    = VU <$> codomain <$> (asks mor)
 eval t@(App r s)          = appM (eval r) (eval s)
 eval (Var i)              = do
   (x,v) <- look i
@@ -87,10 +87,26 @@ eval (Lam x t) = do
     runEval (addMor f $ addPairs [(x,u)] eenv) $ eval t
 eval (Sigma a b)          = VSigma <$> eval a <*> eval b
 eval (SPair a b)          = VSPair <$> eval a <*> eval b
-eval (NamedPair i a b)  = VNSPair i <$> eval a <*> eval b
+eval (NamedPair i a b)    = do
+  eenv <- ask
+  let f = mor eenv
+      rho = env eenv
+  case appMorName f i of
+    Just j  -> do
+      rho' <- mapEnvM (face i) rho
+      let eenv' = eenv{mor=minusMor i f, env=rho'}
+      VNSPair j <$> local (const eenv') (eval a) <*> local (const eenv') (eval b)
+    Nothing -> do
+      let eenv' = eenv{mor=minusMor i f}
+      local (const eenv') (eval a)
+eval (NamedSnd i a)       = do
+  eenv <- ask
+  let f = mor eenv
+      (j,f') = updateMor i f
+  e <- local (const eenv{mor=f'}) (eval a)
+  predNSVal j e
 eval (Fst a)              = fstSVal <$> eval a
 eval (Snd a)              = sndSVal <$> eval a
-eval (NamedSnd i a)     = sndNSVal i <$> eval a
 -- eval f e (Nabla _i a)         = eval f e a
 eval (Where t (ODecls decls))  = local (addDecls decls) $ eval t
 eval (Where t _)          = eval t
@@ -115,7 +131,7 @@ sndNSVal i (VNSPair j a b) | i == j   = b
 sndNSVal i u | isNeutral u = VNSnd i u
              | otherwise   = error $ show u ++ " should be neutral"
 
-predNSVal :: Name -> Val -> Val
+predNSVal :: Name -> Val -> Eval Val
 predNSVal i u = error $ "TODO: implement this !!"
 
 -- Application
@@ -161,7 +177,7 @@ faceName (Just x) (y,d) | x == y    = Nothing
 appMor :: Morphism -> Val -> Eval Val
 appMor g u =
   let appg = appMor g in case u of
-  VU         -> return VU
+  VU xs      -> return (VU xs)
   Closure dom cl -> return $
     Closure (codomain g) (\f u -> cl (compMor g f) u)
   Ter t f e  -> Ter t (compMor f g) <$> appMorEnv g e
@@ -200,7 +216,7 @@ conv :: Int ->  Val -> Val -> Eval Bool
 conv k v1 v2 =
   let cv = conv k in
   case (v1, v2) of
-    (VU, VU) -> return True
+    (VU xs, VU ys) -> return True
     (Closure dom cl, Closure dom' cl') -> do
       v <- mkVar k <$> asks mor
       (dom <==> dom') <&&>

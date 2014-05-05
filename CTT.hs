@@ -220,10 +220,27 @@ faceMor domain i
        (\j -> if i == j then Nothing else Just j)
   | otherwise       = error $ "faceMor: " ++ show i ++ " not in domain"
 
+-- f : I,i -> J,f(i)
+-- f - i : I -> J
+minusMor :: Name -> Morphism -> Morphism
+minusMor i (Morphism dom codom f) = case f i of
+  Just j -> Morphism (i `delete` dom) (j `delete` codom) f
+  Nothing -> Morphism (i `delete` dom) codom f
+
+-- f : I -> J and i fresh for I
+-- returns (f,(i=j)) : I,i -> J,j
+-- Also return j
+updateMor :: Name -> Morphism -> (Name,Morphism)
+updateMor i (Morphism dom codom f)
+  | i `elem` dom = error "updateMor"
+  | otherwise =
+    let fi = fresh codom
+    in (fi,Morphism (i : dom) (fi : codom) (\j -> if i == j then Just fi else f j))
+
 -- swapMor :: [Name] -> Name -> Name -> Morphism
 -- swapMor domain i j = Morphism domain (\k -> ) 
 
-data Val = VU
+data Val = VU [Name] -- VU of codomain
          | Closure [Name] (Morphism -> Val -> Val)
          | Ter Ter Morphism Env -- for Sum
          | VPi Val Val
@@ -417,7 +434,7 @@ instance Show Val where
   show = showVal
 
 showVal :: Val -> String
-showVal VU              = "U"
+showVal (VU _)          = "U"
 showVal (VPi u v)       = "Pi" <+> showVals [u,v]
 showVal (Closure _i _f) = "<closure>"
 showVal (Ter t f e)     = "Ter" <+> showTer t
@@ -439,7 +456,7 @@ showVals :: [Val] -> String
 showVals = hcat . map showVal1
 
 showVal1 :: Val -> String
-showVal1 VU           = "U"
+showVal1 (VU _)       = "U" -- TODO: FIX
 showVal1 (VCon c [])  = c
 showVal1 u@(VVar{})   = showVal u
 showVal1 u            = parens $ showVal u
