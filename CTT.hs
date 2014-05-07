@@ -184,13 +184,16 @@ data Morphism = Morphism
   { domain     :: [Name]
   , codomain   :: [Name]
   , appMorName :: Name -> EName }
+-- JP: Do we have codomain == catMaybes $ map appMorName domain?
+
+normalizedDomain = nub . sort . domain
 
 -- instance Nominal Morphism where
 --   support f  = support_of_morphism f
 --   swap f x y = Morphism (support ([x,y],f)) (\z -> swap (appMorName f z) x y)
 
 instance Eq Morphism where
-  (==) f g = (sort (nub (domain f))) == (sort (nub (domain g)))
+  (==) f g = normalizedDomain f == normalizedDomain g
              && all (\x -> appMorName f x == appMorName g x) (domain f)
 
 showEName :: EName -> String
@@ -201,10 +204,11 @@ instance Show Morphism where
   show f = ccat [ show x ++ " -> " ++ showEName (appMorName f x)
                 | x <- domain f, appMorName f x /= Just x ]
 
+-- Identity morphism
 idMor :: [Name] -> Morphism
 idMor domain = Morphism domain domain Just
 
--- Composition in diagramatic order
+-- Composition in diagramatic order (g after f)
 compMor :: Morphism -> Morphism -> Morphism
 compMor f g
   | codomain f == domain g =
@@ -212,7 +216,7 @@ compMor f g
              (\x -> appMorName g =<< appMorName f x)
   | otherwise = error "compMor: 'codomain f' and 'domain g' do not match"
 
--- face morphism, i should be in the domain
+-- face morphism, @i@ should be in the domain
 faceMor :: [Name] -> Name -> Morphism
 faceMor domain i
   | i `elem` domain =
