@@ -244,6 +244,72 @@ valOfEnv (Pair env (_,v)) = v : valOfEnv env
 valOfEnv (PDef _ env)     = valOfEnv env
 
 --------------------------------------------------------------------------------
+-- | Morphisms
+
+type EName = Maybe Name
+
+data Morphism = Morphism 
+  { domain     :: [Name]
+  , codomain   :: [Name]
+  , appMorName :: Name -> EName }
+-- JP: Do we have codomain == catMaybes $ map appMorName domain?
+
+normalizedDomain = nub . sort . domain
+
+instance Eq Morphism where
+  (==) f g = normalizedDomain f == normalizedDomain g
+             && all (\x -> appMorName f x == appMorName g x) (domain f)
+
+showEName :: EName -> String
+showEName Nothing  = "0"
+showEName (Just x) = show x
+
+instance Show Morphism where
+  show f = ccat [ show x ++ " -> " ++ showEName (appMorName f x)
+                | x <- domain f, appMorName f x /= Just x ]
+
+-- Identity morphism
+idMor :: [Name] -> Morphism
+idMor domain = Morphism domain domain Just
+
+-- Composition in diagramatic order (g after f)
+compMor :: Morphism -> Morphism -> Morphism
+compMor f g
+  | codomain f == domain g =
+    Morphism (domain f) (codomain g)
+             (\x -> appMorName g =<< appMorName f x)
+  | otherwise = error "compMor: 'codomain f' and 'domain g' do not match"
+
+-- face morphism, @i@ should be in the domain
+faceMor :: [Name] -> Name -> Morphism
+faceMor domain i
+  | i `elem` domain =
+     Morphism domain (i `delete` domain)
+       (\j -> if i == j then Nothing else Just j)
+  | otherwise       = error $ "faceMor: " ++ show i ++ " not in domain"
+
+-- f : I,i -> J,f(i)
+-- f - i : I -> J
+minusMor :: Name -> Morphism -> Morphism
+minusMor i (Morphism dom codom f) = case f i of
+  Just j -> Morphism (i `delete` dom) (j `delete` codom) f
+  Nothing -> Morphism (i `delete` dom) codom f
+
+-- f : I -> J and i fresh for I
+-- returns (f,(i=j)) : I,i -> J,j
+-- Also return j
+updateMor :: Name -> Morphism -> (Name,Morphism)
+updateMor i (Morphism dom codom f)
+  | i `elem` dom = error "updateMor"
+  | otherwise =
+    let fi = fresh codom
+    in (fi,Morphism (i : dom) (fi : codom) (\j -> if i == j then Just fi else f j))
+
+-- swapMor :: [Name] -> Name -> Name -> Morphism
+-- swapMor domain i j = Morphism domain (\k -> ) 
+
+
+--------------------------------------------------------------------------------
 -- | Pretty printing
 
 instance Show Loc where
@@ -310,3 +376,5 @@ showVal1 VU          = "U"
 showVal1 (VCon c []) = c
 showVal1 u@(VVar{})  = showVal u
 showVal1 u           = parens $ showVal u
+
+
