@@ -5,44 +5,72 @@ import Data.Maybe (fromMaybe)
 
 import CTT
 
-look :: Ident -> Env -> (Binder, Val)
-look x (Pair rho (n@(y,l),u))
+look :: Ident -> Morphism -> Env -> (Binder, Val)
+look x f (Pair rho (n@(y,l),u))
   | x == y    = (n, u)
-  | otherwise = look x rho
-look x r@(PDef es r1) = case lookupIdent x es of
-  Just (y,t)  -> (y,eval r t)
-  Nothing     -> look x r1
+  | otherwise = look x f rho
+look x f r@(PDef es r1) = case lookupIdent x es of
+  Just (y,t)  -> (y,eval f r t)
+  Nothing     -> look x f r1
 
-eval :: Env -> Ter -> Val
-eval e U               = VU
-eval e (App r s)       = app (eval e r) (eval e s)
-eval e (Var i)         = snd (look i e)
-eval e (Pi a b)        = VPi (eval e a) (eval e b)
-eval e (Lam x t)       = Ter (Lam x t) e -- stop at lambdas
-eval e (Sigma a b)     = VSigma (eval e a) (eval e b)
-eval e (SPair a b)     = VSPair (eval e a) (eval e b)
-eval e (Fst a)         = fstSVal (eval e a)
-eval e (Snd a)         = sndSVal (eval e a)
-eval e (Where t decls) = eval (PDef [ (x,y) | (x,_,y) <- decls ] e) t
-eval e (Con name ts)   = VCon name (map (eval e) ts)
-eval e (Split pr alts) = Ter (Split pr alts) e
-eval e (Sum pr ntss)   = Ter (Sum pr ntss) e
-eval e (Undef _)       = error "undefined"
+eval :: Morphism -> Env -> Ter -> Val
+eval f e U               = VU
+eval f e (App r s)       = app (eval f e r) (eval f e s)
+eval f e (Var i)         = snd (look i f e)
+eval f e (Pi a b)        = VPi (eval f e a) (eval f e b)
+eval f e (Lam x t)       = Ter (Lam x t) f e -- stop at lambdas
+eval f e (Sigma a b)     = VSigma (eval f e a) (eval f e b)
+eval f e (SPair a b)     = VSPair (eval f e a) (eval f e b)
+eval f e (Fst a)         = fstSVal (eval f e a)
+eval f e (Snd a)         = sndSVal (eval f e a)
+eval f e (Where t decls) = eval f (PDef [ (x,y) | (x,_,y) <- decls ] e) t
+eval f e (Con name ts)   = VCon name (map (eval f e) ts)
+eval f e (Split pr alts) = Ter (Split pr alts) f e
+eval f e (Sum pr ntss)   = Ter (Sum pr ntss) f e
+eval f e (Undef _)       = error "undefined"
 
-evals :: Env -> [(Binder,Ter)] -> [(Binder,Val)]
-evals env bts = [ (b,eval env t) | (b,t) <- bts ]
+evals :: Morphism -> Env -> [(Binder,Ter)] -> [(Binder,Val)]
+evals f env bts = [ (b,eval f env t) | (b,t) <- bts ]
 
+-- TODO: Finish!
 app :: Val -> Val -> Val
-app (Ter (Lam x t) e) u = eval (Pair e (x,u)) t
-app (Ter (Split _ nvs) e) (VCon name us) = case lookup name nvs of
-    Just (xs,t)  -> eval (upds e (zip xs us)) t
+app (Ter (Lam x t) f e) u = eval f (Pair e (x,u)) t
+app (Ter (Split _ nvs) f e) (VCon name us) = case lookup name nvs of
+    Just (xs,t)  -> eval f (upds e (zip xs us)) t
     Nothing -> error $ "app: Split with insufficient arguments; " ++
                         "missing case for " ++ name
-app u@(Ter (Split _ _) _) v | isNeutral v = VSplit u v -- v should be neutral
+app u@(Ter (Split _ _) _ _) v | isNeutral v = VSplit u v -- v should be neutral
                             | otherwise   = error $ "app: VSplit " ++ show v
                                                   ++ " is not neutral"
 app r s | isNeutral r = VApp r s -- r should be neutral
         | otherwise   = error $ "app: VApp " ++ show r ++ " is not neutral"
+
+appMorEnv :: Morphism -> Env -> Env
+appMorEnv f = mapEnv (appMor f)
+
+appMor :: Morphism -> Val -> Val
+appMor g u =
+  let appg = appMor g in case u of
+  VU         -> VU
+  Ter t f e  -> Ter t (compMor f g) (appMorEnv g e)
+  VPi a f    -> VPi (appg a) (appg f)
+  VSigma a f -> VSigma (appg a) (appg f)
+  VSPair a b -> VSPair (appg a) (appg b)
+  VApp u v   -> app (appg u) (appg v)
+  VSplit u v -> app (appg u) (appg v)
+  VVar s d   -> VVar s (map (\x -> case x of Just y -> appMorName g y;
+                                             Nothing -> Nothing) d)
+  VFst p     -> fstSVal (appg p)
+  VSnd p     -> sndSVal (appg p)
+  VNSnd y p  -> sndNSVal y (appg p)
+  VNSPair i a b -> case appMorName g i of
+    Just j  -> VNSPair j (appMor (minusMor i g) a) (appMor (minusMor i g) b)
+    Nothing -> appMor (minusMor i g) a
+
+sndNSVal :: Name -> Val -> Val
+sndNSVal i (VNSPair j a b) | i == j   = b
+sndNSVal i u | isNeutral u = VNSnd i u
+             | otherwise   = error $ show u ++ " should be neutral"
 
 
 fstSVal, sndSVal :: Val -> Val
@@ -176,42 +204,48 @@ sndSVal u | isNeutral u = VSnd u
 --     | otherwise             -> return $ VLine y
 --   VIntRec f s e l u -> join $ intrec <$> fc f <*> fc s <*> fc e <*> fc l <*> fc u
 
-conv :: Int -> Val -> Val -> Bool
-conv k VU VU                                  = True
-conv k (Ter (Lam x u) e) (Ter (Lam x' u') e') = do
-  let v = mkVar k $ support (e, e')
-  conv (k+1) (eval (Pair e (x,v)) u) (eval (Pair e' (x',v)) u')
-conv k (Ter (Lam x u) e) u' = do
-  let v = mkVar k $ support e
-  conv (k+1) (eval (Pair e (x,v)) u) (app u' v)
-conv k u' (Ter (Lam x u) e) = do
-  let v = mkVar k $ support e
-  conv (k+1) (app u' v) (eval (Pair e (x,v)) u)
-conv k (Ter (Split p _) e) (Ter (Split p' _) e') =
-  (p == p') && convEnv k e e'
-conv k (Ter (Sum p _) e)   (Ter (Sum p' _) e') =
-  (p == p') && convEnv k e e'
-conv k (Ter (Undef p) e) (Ter (Undef p') e') =
-  (p == p') && convEnv k e e'
-conv k (VPi u v) (VPi u' v') = do
-  let w = mkVar k $ support [u,u',v,v']
-  conv k u u' && conv (k+1) (app v w) (app v' w)
-conv k (VSigma u v) (VSigma u' v') = do
-  let w = mkVar k $ support [u,u',v,v']
-  conv k u u' && conv (k+1) (app v w) (app v' w)
-conv k (VFst u) (VFst u') = conv k u u'
-conv k (VSnd u) (VSnd u') = conv k u u'
-conv k (VCon c us) (VCon c' us') =
-  (c == c') && and (zipWith (conv k) us us')
-conv k (VSPair u v) (VSPair u' v')   = conv k u u' && conv k v v'
-conv k (VSPair u v) w                =
-  conv k u (fstSVal w) && conv k v (sndSVal w)
-conv k w            (VSPair u v)     =
-  conv k (fstSVal w) u && conv k (sndSVal w) v
-conv k (VApp u v)     (VApp u' v')   = conv k u u' && conv k v v'
-conv k (VSplit u v)   (VSplit u' v') = conv k u u' && conv k v v'
-conv k (VVar x d)     (VVar x' d')   = (x == x') && (d == d')
-conv k _              _              = False
 
-convEnv :: Int -> Env -> Env -> Bool
-convEnv k e e' = and $ zipWith (conv k) (valOfEnv e) (valOfEnv e')
+
+conv :: Int -> [Name] -> Val -> Val -> Bool
+conv k xs VU VU                                  = True
+conv k xs (Ter (Lam x u) f e) (Ter (Lam x' u') f' e') =
+  let v = mkVar k xs
+  in conv (k+1) xs (eval f (Pair e (x,v)) u) (eval f' (Pair e' (x',v)) u')
+conv k xs (Ter (Lam x u) f e) u' =
+  let v = mkVar k xs
+  in conv (k+1) xs (eval f (Pair e (x,v)) u) (app u' v)
+conv k xs u' (Ter (Lam x u) f e) =
+  let v = mkVar k xs
+  in conv (k+1) xs (app u' v) (eval f (Pair e (x,v)) u)
+conv k xs (Ter (Split p _) f e) (Ter (Split p' _) f' e') =
+  (p == p' && f == f') && convEnv k xs e e'
+conv k xs (Ter (Sum p _) f e)   (Ter (Sum p' _) f' e') =
+  (p == p' && f == f') && convEnv k xs e e'
+conv k xs (Ter (Undef p) f e) (Ter (Undef p') f' e') =
+  (p == p' && f == f') && convEnv k xs e e'
+conv k xs (VPi u v) (VPi u' v') =
+  let w = mkVar k xs
+  in conv k xs u u' && conv (k+1) xs (app v w) (app v' w)
+conv k xs (VSigma u v) (VSigma u' v') =
+  let w = mkVar k xs
+  in conv k xs u u' && conv (k+1) xs (app v w) (app v' w)
+conv k xs (VFst u) (VFst u') = conv k xs u u'
+conv k xs (VSnd u) (VSnd u') = conv k xs u u'
+conv k xs (VCon c us) (VCon c' us') =
+  (c == c') && and (zipWith (conv k xs) us us')
+conv k xs (VSPair u v) (VSPair u' v')   = conv k xs u u' && conv k xs v v'
+conv k xs (VSPair u v) w                =
+  conv k xs u (fstSVal w) && conv k xs v (sndSVal w)
+conv k xs w            (VSPair u v)     =
+  conv k xs (fstSVal w) u && conv k xs (sndSVal w) v
+conv k xs (VApp u v)     (VApp u' v')   = conv k xs u u' && conv k xs v v'
+conv k xs (VSplit u v)   (VSplit u' v') = conv k xs u u' && conv k xs v v'
+conv k xs (VVar x d)     (VVar x' d')   = (x == x') && (d == d')
+conv k xs (VNSnd i u) (VNSnd i' u')     =
+  conv k (i:xs) u (appMor (swapMor xs i' i) u')
+conv k xs (VNSPair i u v) (VNSPair i' u' v') = i == i' &&
+  conv k (delete i xs) u u' && conv k (delete i xs) v v'
+conv k _ _              _               = False
+
+convEnv :: Int -> [Name] -> Env -> Env -> Bool
+convEnv k xs e e' = and $ zipWith (conv k xs) (valOfEnv e) (valOfEnv e')

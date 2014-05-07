@@ -126,6 +126,16 @@ resolveVar (AIdent (l,x))
         "Cannot resolve variable" <+> x <+> "at position" <+>
         show l <+> "in module" <+> modName
 
+resolveName :: AIdent -> Resolver C.Name
+resolveName (AIdent (l,x)) = do
+    modName <- getModule
+    vars    <- getVariables
+    case C.getIdent x vars of
+      Just Name    -> return $ C.N x
+      _    -> throwError $
+        "Cannot resolve color " ++ x ++ " at position " ++ show l
+        ++ " in module " ++ modName
+
 lam :: AIdent -> Resolver Ter -> Resolver Ter
 lam a e = do x <- resolveBinder a; C.Lam x <$> local (insertVar x) e
 
@@ -153,6 +163,13 @@ resolveExp (Fun a b)    = bind C.Pi (AIdent ((0,0),"_"), a) (resolveExp b)
 resolveExp (Lam x xs t) = lams (x:xs) (resolveExp t)
 resolveExp (Fst t)      = C.Fst <$> resolveExp t
 resolveExp (Snd t)      = C.Snd <$> resolveExp t
+resolveExp (CSnd t i)   = C.NamedSnd <$> resolveName i <*> resolveExp t
+resolveExp (CSigma t i b) = case pseudoTele [t] of
+  Just tele -> do
+    i' <- resolveName i
+    binds (C.NamedPair i') tele (resolveExp b)
+  Nothing   -> throwError "telescope malformed in colored Sigma"
+resolveExp (CPair t0 i t1) = C.NamedPair <$> resolveName i <*> resolveExp t0 <*>resolveExp t1
 resolveExp (Pair t0 t1) = C.SPair <$> resolveExp t0 <*> resolveExp t1
 resolveExp (Split brs)  = do
     brs' <- mapM resolveBranch brs

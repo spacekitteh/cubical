@@ -67,6 +67,9 @@ data Ter = App Ter Ter
          -- labelled sum c1 A1s,..., cn Ans (assumes terms are constructors)
          | Sum Binder LblSum
          | Undef Loc
+         | NamedPair Name Ter Ter
+         | NamedSnd Name Ter
+
   deriving Eq
 
 -- For an expression t, returns (u,ts) where u is no application
@@ -92,66 +95,80 @@ mkWheres []     e = e
 mkWheres (d:ds) e = Where (mkWheres ds e) d
 
 --------------------------------------------------------------------------------
--- | Names, dimension, and nominal type class
+-- | Names, dimension
 
-type Name = Integer
-type Dim  = [Name]
+newtype Name = N String
+  deriving (Eq,Ord)
 
-gensym :: Dim -> Name
-gensym [] = 2
-gensym xs = maximum xs + 1
+instance Show Name where
+  show (N s) = s
 
-gensyms :: Dim -> [Name]
-gensyms d = let x = gensym d in x : gensyms (x : d)
+allStrings :: [String]
+allStrings = [] : [x:s | s <- allStrings, x <- ['a'..'z']]
 
-class Nominal a where
-  swap :: a -> Name -> Name -> a
-  support :: a -> [Name]
+allSyms :: [Name]
+allSyms = tail $ map N allStrings
 
-fresh :: Nominal a => a -> Name
-fresh = gensym . support
+gensym :: [Name] -> Name
+gensym xs = head $ gensyms xs
 
-freshs :: Nominal a => a -> [Name]
-freshs = gensyms . support
+gensyms :: [Name] -> [Name]
+gensyms d = allSyms \\ d
 
-instance (Nominal a, Nominal b) => Nominal (a, b) where
-  support (a, b)  = support a `union` support b
-  swap (a, b) x y = (swap a x y, swap b x y)
+-- class Nominal a where
+-- --  swap :: a -> Name -> Name -> a
+--   support :: a -> [Name]
 
-instance Nominal a => Nominal [a]  where
-  support vs  = unions (map support vs)
-  swap vs x y = [swap v x y | v <- vs]
+-- fresh :: Nominal a => a -> Name
+-- fresh = gensym . support
 
--- Make Name an instance of Nominal
-instance Nominal Integer where
-  support 0 = []
-  support 1 = []
-  support n = [n]
+-- freshs :: Nominal a => a -> [Name]
+-- freshs = gensyms . support
 
-  swap z x y | z == x    = y
-             | z == y    = x
-             | otherwise = z
+-- instance (Nominal a, Nominal b) => Nominal (a, b) where
+--   support (a, b)  = support a `union` support b
+-- --  swap (a, b) x y = (swap a x y, swap b x y)
+
+-- instance (Nominal a) => Nominal (Maybe a) where
+--   support (Just x) = support x
+--   support Nothing  = []
+
+-- instance Nominal a => Nominal [a]  where
+--   support vs  = unions (map support vs)
+-- --  swap vs x y = [swap v x y | v <- vs]
+
+-- -- Make Name an instance of Nominal
+-- instance Nominal Name where
+--   support n = [n]
+
+--   -- swap z x y | z == x    = y
+--   --            | z == y    = x
+--   --            | otherwise = z
 
 --------------------------------------------------------------------------------
 -- | Values
 
 data Val = VU
-         | Ter Ter Env
+         | Ter Ter Morphism Env
          | VPi Val Val
          | VId Val Val Val
          | VSigma Val Val
          | VSPair Val Val
          | VCon Ident [Val]
+
+         | VNSPair Name Val Val
+
          -- neutral values
          | VApp Val Val            -- the first Val must be neutral
          | VSplit Val Val          -- the second Val must be neutral
          | VVar String Dim
          | VFst Val
          | VSnd Val
+         | VNSnd Name Val
   deriving Eq
 
-mkVar :: Int -> Dim -> Val
-mkVar k = VVar ('X' : show k)
+mkVar :: Int -> [Name] -> Val
+mkVar k f = VVar ('X' : show k) (map Just f)
 
 isNeutral :: Val -> Bool
 isNeutral (VApp u _)   = isNeutral u
@@ -159,6 +176,7 @@ isNeutral (VSplit _ v) = isNeutral v
 isNeutral (VVar _ _)   = True
 isNeutral (VFst v)     = isNeutral v
 isNeutral (VSnd v)     = isNeutral v
+isNeutral (VNSnd _i v) = isNeutral v
 isNeutral _            = False
 
 unCon :: Val -> [Val]
@@ -168,35 +186,38 @@ unCon v           = error $ "unCon: not a constructor: " ++ show v
 unions :: Eq a => [[a]] -> [a]
 unions = foldr union []
 
-instance Nominal Val where
-  support VU            = []
-  support (Ter _ e)     = support e
-  support (VId a v0 v1) = support [a,v0,v1]
-  support (VPi v1 v2)   = support [v1,v2]
-  support (VCon _ vs)   = support vs
-  support (VApp u v)    = support (u, v)
-  support (VSplit u v)  = support (u, v)
-  support (VVar x d)    = support d
-  support (VSigma u v)  = support (u,v)
-  support (VSPair u v)  = support (u,v)
-  support (VFst u)      = support u
-  support (VSnd u)      = support u
+-- instance Nominal Val where
+--   support VU            = []
+--   support (Ter _ _ e)   = support e
+--   support (VId a v0 v1) = support [a,v0,v1]
+--   support (VPi v1 v2)   = support [v1,v2]
+--   support (VCon _ vs)   = support vs
+--   support (VApp u v)    = support (u, v)
+--   support (VSplit u v)  = support (u, v)
+--   support (VVar x d)    = support d
+--   support (VSigma u v)  = support (u,v)
+--   support (VSPair u v)  = support (u,v)
+--   support (VFst u)      = support u
+--   support (VSnd u)      = support u
+--   support (VNSnd i u)   = delete i $ support u
+--   support (VNSPair i u v) = i : support (u,v)
+
 --  support v                    = error ("support " ++ show v)
 
-  swap u x y =
-    let sw u = swap u x y in case u of
-    VU          -> VU
-    Ter t e     -> Ter t (swap e x y)
-    VId a v0 v1 -> VId (sw a) (sw v0) (sw v1)
-    VPi a f     -> VPi (sw a) (sw f)
-    VCon c us   -> VCon c (map sw us)
-    VApp u v    -> VApp (sw u) (sw v)
-    VSplit u v  -> VSplit (sw u) (sw v)
-    VVar s d    -> VVar s (swap d x y)
-    VSigma u v  -> VSigma (sw u) (sw v)
-    VSPair u v  -> VSPair (sw u) (sw v)
-    VFst u      -> VFst (sw u)
-    VSnd u      -> VSnd (sw u)
+  -- swap u x y =
+  --   let sw u = swap u x y in case u of
+  --   VU          -> VU
+  --   Ter t f e     -> Ter t f (swap e x y)
+  --   VId a v0 v1 -> VId (sw a) (sw v0) (sw v1)
+  --   VPi a f     -> VPi (sw a) (sw f)
+  --   VCon c us   -> VCon c (map sw us)
+  --   VApp u v    -> VApp (sw u) (sw v)
+  --   VSplit u v  -> VSplit (sw u) (sw v)
+  --   VVar s d    -> VVar s (swap d x y)
+  --   VSigma u v  -> VSigma (sw u) (sw v)
+  --   VSPair u v  -> VSPair (sw u) (sw v)
+  --   VFst u      -> VFst (sw u)
+  --   VSnd u      -> VSnd (sw u)
 
 --------------------------------------------------------------------------------
 -- | Environments
@@ -214,12 +235,12 @@ instance Show Env where
       showEnv1 (Pair env (x,u)) = showEnv1 env ++ show u ++ ", "
       showEnv1 e                = show e
 
-instance Nominal Env where
-  swap e x y = mapEnv (\u -> swap u x y) e
+-- instance Nominal Env where
+--   -- swap e x y = mapEnv (\u -> swap u x y) e
 
-  support Empty          = []
-  support (Pair e (_,v)) = support (e, v)
-  support (PDef _ e)     = support e
+--   support Empty          = []
+--   support (Pair e (_,v)) = support (e, v)
+--   support (PDef _ e)     = support e
 
 upds :: Env -> [(Binder,Val)] -> Env
 upds = foldl Pair
@@ -247,8 +268,9 @@ valOfEnv (PDef _ env)     = valOfEnv env
 -- | Morphisms
 
 type EName = Maybe Name
+type Dim   = [EName]
 
-data Morphism = Morphism 
+data Morphism = Morphism
   { domain     :: [Name]
   , codomain   :: [Name]
   , appMorName :: Name -> EName }
@@ -302,11 +324,12 @@ updateMor :: Name -> Morphism -> (Name,Morphism)
 updateMor i (Morphism dom codom f)
   | i `elem` dom = error "updateMor"
   | otherwise =
-    let fi = fresh codom
+    let fi = gensym codom
     in (fi,Morphism (i : dom) (fi : codom) (\j -> if i == j then Just fi else f j))
 
--- swapMor :: [Name] -> Name -> Name -> Morphism
--- swapMor domain i j = Morphism domain (\k -> ) 
+swapMor :: [Name] -> Name -> Name -> Morphism
+swapMor domain i j =
+  Morphism (i:domain) (j:domain) (\x -> if x == i then Just j else Just x)
 
 
 --------------------------------------------------------------------------------
@@ -333,6 +356,8 @@ showTer (Con c es)    = c <+> showTers es
 showTer (Split l _)   = "split " ++ show l
 showTer (Sum l _)     = "sum " ++ show l
 showTer (Undef _)     = "undefined"
+showTer (NamedSnd i e)         = showTer e ++ "." ++ show i
+showTer (NamedPair i e0 e1)    = ("Cpair" ++ show i) <+> showTers [e0,e1]
 
 showTers :: [Ter] -> String
 showTers = hcat . map showTer1
@@ -353,7 +378,7 @@ instance Show Val where
 
 showVal :: Val -> String
 showVal VU           = "U"
-showVal (Ter t env)  = show t <+> show env
+showVal (Ter t f env) = show t <+> show env
 showVal (VId a u v)  = "Id" <+> showVal1 a <+> showVal1 u <+> showVal1 v
 showVal (VCon c us)  = c <+> showVals us
 showVal (VPi a f)    = "Pi" <+> showVals [a,f]
@@ -364,6 +389,8 @@ showVal (VSPair u v) = "pair" <+> showVals [u,v]
 showVal (VSigma u v) = "Sigma" <+> showVals [u,v]
 showVal (VFst u)     = showVal u ++ ".1"
 showVal (VSnd u)     = showVal u ++ ".2"
+showVal (VNSnd i u)     = showVal u ++ "." ++ show i
+showVal (VNSPair i u v) = "Cpair" ++ show i  <+> showVals [u,v]
 
 showDim :: Show a => [a] -> String
 showDim = parens . ccat . map show
@@ -376,5 +403,3 @@ showVal1 VU          = "U"
 showVal1 (VCon c []) = c
 showVal1 u@(VVar{})  = showVal u
 showVal1 u           = parens $ showVal u
-
-
