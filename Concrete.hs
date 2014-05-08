@@ -101,6 +101,9 @@ insertCon x = insertBinder (x,Constructor)
 insertCons :: [C.Binder] -> Env -> Env
 insertCons = flip $ foldr insertCon
 
+insertName :: C.Binder -> Env -> Env
+insertName x = insertBinder (x,Name)
+
 getModule :: Resolver String
 getModule = envModule <$> ask
 
@@ -163,7 +166,9 @@ resolveExp (Fun a b)    = bind C.Pi (AIdent ((0,0),"_"), a) (resolveExp b)
 resolveExp (Lam x xs t) = lams (x:xs) (resolveExp t)
 resolveExp (Fst t)      = C.Fst <$> resolveExp t
 resolveExp (Snd t)      = C.Snd <$> resolveExp t
-resolveExp (CSnd t i)   = C.NamedSnd <$> resolveName i <*> resolveExp t
+resolveExp (CSnd t i)   = do
+  i' <- resolveBinder i
+  local (insertName i') $ C.NamedSnd <$> resolveName i <*> resolveExp t
 resolveExp (CSigma t i b) = case pseudoTele [t] of
   Just tele -> do
     i' <- resolveName i

@@ -1,0 +1,36 @@
+module idparam where
+
+thm : (f : (A : U) -> A -> A) (A : U) (P : A -> U) (a : A) -> P a -> P (f A a)
+thm f A P a q = (f ((x : A) *_i P x) (a ,_i q)) ._i
+
+N : U
+data N = zero | suc (n : N)
+
+nat : U
+nat = (A : U) -> A -> (A -> A) -> A
+
+zer : nat
+zer A z _ = z
+
+one : nat
+one A z s = s z
+
+pred : N -> U
+pred = split
+  zero  -> N
+  suc n -> pred n
+
+predZero : pred zero
+predZero = zero
+
+predSuc : (x : N) -> pred x -> pred (suc x)
+predSuc x p = p
+
+thm2 : (A : U) (P : A -> U) (z : A) (s : A -> A) (pz : P z) (ps : (a : A) -> P a -> P (s a))
+       (n : nat) -> P (n A z s)
+thm2 A P z s pz ps n = (n ((x : A) *_i P x) (z ,_i pz) (s ,_i \x y -> ps x y)) ._i
+
+
+test : N
+test = thm2 N pred zero (\x -> suc x) predZero predSuc one
+ 

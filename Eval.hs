@@ -57,8 +57,10 @@ app u@(Ter (Split _ _) _ _) v | isNeutral v = VSplit u v -- v should be neutral
                                                   ++ " is not neutral"
 app (VNSPair i u v) (VNSPair i' a b) | i == i' =
   VNSPair i (app u a) (app (app v a) b)
-app r s | isNeutral r = VApp r s -- r should be neutral
-        | otherwise   = error $ "app: VApp " ++ show r ++ " is not neutral"
+app r s = VApp r s
+-- TODO: fix neutral and use:
+-- app r s | isNeutral r = VApp r s -- r should be neutral
+--        | otherwise   = error $ "app: VApp " ++ show r ++ " is not neutral"
 
 appMorEnv :: Morphism -> Env -> Env
 appMorEnv f = mapEnv (appMor f)
@@ -66,6 +68,7 @@ appMorEnv f = mapEnv (appMor f)
 appMor :: Morphism -> Val -> Val
 appMor g u = case u of
   VU         -> VU
+  VCon n vs  -> VCon n (map (appMor g) vs)
   Ter t f e  -> Ter t (compMor f g) (appMorEnv g e)
   VPi a f    -> VPi (appMor g a) (appMor g f)
   VSigma a f -> VSigma (appMor g a) (appMor g f)
@@ -80,6 +83,7 @@ appMor g u = case u of
                    in case appMorName g i of
     Just j  -> VNSPair j (appMor g' a) (appMor g' b)
     Nothing -> appMor g' a
+  _ -> error $ "appMor: " ++ show u
 
 -- sndNSVal :: Name -> Val -> Val
 -- sndNSVal i (VNSPair j a b) | i == j   = b
