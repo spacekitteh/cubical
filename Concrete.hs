@@ -62,7 +62,7 @@ pseudoTele (PseudoTDecl exp typ : pd) = do
 -------------------------------------------------------------------------------
 -- | Resolver and environment
 
-data SymKind = Variable | Constructor
+data SymKind = Variable | Constructor | Name
   deriving (Eq,Show)
 
 -- local environment for constructors

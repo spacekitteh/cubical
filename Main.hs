@@ -98,7 +98,7 @@ initLoop flags f = do
 
 -- The main loop
 loop :: [Flag] -> FilePath -> [(C.Binder,SymKind)] -> TC.TEnv -> Interpreter ()
-loop flags f names tenv@(TC.TEnv _ rho _ _) = do
+loop flags f names tenv@(TC.TEnv _ dom rho _ _) = do
   input <- getInputLine prompt
   case input of
     Nothing    -> outputStrLn help >> loop flags f names tenv
@@ -123,7 +123,7 @@ loop flags f names tenv@(TC.TEnv _ rho _ _) = do
             Left err -> do outputStrLn ("Could not type-check: " ++ err)
                            loop flags f names tenv
             Right _  -> do
-              let e = E.eval rho body
+              let e = E.eval (C.idMor dom) rho body
               outputStrLn ("EVAL: " ++ show e)
               loop flags f names tenv
 
