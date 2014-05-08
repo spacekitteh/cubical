@@ -1,8 +1,8 @@
 module CTT where
 
-import Control.Applicative
+import Control.Monad
 import Data.List
-import Data.Maybe
+
 import Pretty
 
 --------------------------------------------------------------------------------
@@ -69,7 +69,6 @@ data Ter = App Ter Ter
          | Undef Loc
          | NamedPair Name Ter Ter
          | NamedSnd Name Ter
-
   deriving Eq
 
 -- For an expression t, returns (u,ts) where u is no application
@@ -155,16 +154,13 @@ data Val = VU
          | VSigma Val Val
          | VSPair Val Val
          | VCon Ident [Val]
-
          | VNSPair Name Val Val
-
-         -- neutral values
+         | VNSnd Name Val
          | VApp Val Val            -- the first Val must be neutral
          | VSplit Val Val          -- the second Val must be neutral
          | VVar String Dim
          | VFst Val
          | VSnd Val
-         | VNSnd Name Val
   deriving Eq
 
 mkVar :: Int -> [Name] -> Val
@@ -179,12 +175,8 @@ isNeutral (VSnd v)     = isNeutral v
 isNeutral (VNSnd _i v) = isNeutral v
 isNeutral _            = False
 
-unCon :: Val -> [Val]
-unCon (VCon _ vs) = vs
-unCon v           = error $ "unCon: not a constructor: " ++ show v
-
-unions :: Eq a => [[a]] -> [a]
-unions = foldr union []
+-- unions :: Eq a => [[a]] -> [a]
+-- unions = foldr union []
 
 -- instance Nominal Val where
 --   support VU            = []
@@ -279,8 +271,8 @@ data Morphism = Morphism
 normalizedDomain = nub . sort . domain
 
 instance Eq Morphism where
-  (==) f g = normalizedDomain f == normalizedDomain g
-             && all (\x -> appMorName f x == appMorName g x) (domain f)
+  f == g = normalizedDomain f == normalizedDomain g
+         && all (\x -> appMorName f x == appMorName g x) (domain f)
 
 showEName :: EName -> String
 showEName Nothing  = "0"
@@ -299,7 +291,7 @@ compMor :: Morphism -> Morphism -> Morphism
 compMor f g
   | codomain f == domain g =
     Morphism (domain f) (codomain g)
-             (\x -> appMorName g =<< appMorName f x)
+             (appMorName g <=< appMorName f)
   | otherwise = error "compMor: 'codomain f' and 'domain g' do not match"
 
 -- face morphism, @i@ should be in the domain
@@ -325,12 +317,12 @@ updateMor i (Morphism dom codom f)
   | i `elem` dom = error "updateMor"
   | otherwise =
     let fi = gensym codom
-    in (fi,Morphism (i : dom) (fi : codom) (\j -> if i == j then Just fi else f j))
+    in (fi,Morphism (i : dom) (fi : codom) (
+               \j -> if i == j then Just fi else f j))
 
 swapMor :: [Name] -> Name -> Name -> Morphism
 swapMor domain i j =
-  Morphism (i:domain) (j:domain) (\x -> if x == i then Just j else Just x)
-
+  Morphism (i:domain) (j:domain) (\x -> Just (if x == i then j else x))
 
 --------------------------------------------------------------------------------
 -- | Pretty printing
@@ -342,22 +334,22 @@ instance Show Ter where
   show = showTer
 
 showTer :: Ter -> String
-showTer U             = "U"
-showTer (App e0 e1)   = showTer e0 <+> showTer1 e1
-showTer (Pi e0 e1)    = "Pi" <+> showTers [e0,e1]
-showTer (Lam (x,_) e) = '\\' : x <+> "->" <+> showTer e
-showTer (Fst e)       = showTer e ++ ".1"
-showTer (Snd e)       = showTer e ++ ".2"
-showTer (Sigma e0 e1) = "Sigma" <+> showTers [e0,e1]
-showTer (SPair e0 e1) = "pair" <+> showTers [e0,e1]
-showTer (Where e d)   = showTer e <+> "where" <+> showDecls d
-showTer (Var x)       = x
-showTer (Con c es)    = c <+> showTers es
-showTer (Split l _)   = "split " ++ show l
-showTer (Sum l _)     = "sum " ++ show l
-showTer (Undef _)     = "undefined"
-showTer (NamedSnd i e)         = showTer e ++ "." ++ show i
-showTer (NamedPair i e0 e1)    = ("Cpair" ++ show i) <+> showTers [e0,e1]
+showTer U                   = "U"
+showTer (App e0 e1)         = showTer e0 <+> showTer1 e1
+showTer (Pi e0 e1)          = "Pi" <+> showTers [e0,e1]
+showTer (Lam (x,_) e)       = '\\' : x <+> "->" <+> showTer e
+showTer (Fst e)             = showTer e ++ ".1"
+showTer (Snd e)             = showTer e ++ ".2"
+showTer (Sigma e0 e1)       = "Sigma" <+> showTers [e0,e1]
+showTer (SPair e0 e1)       = "pair" <+> showTers [e0,e1]
+showTer (Where e d)         = showTer e <+> "where" <+> showDecls d
+showTer (Var x)             = x
+showTer (Con c es)          = c <+> showTers es
+showTer (Split l _)         = "split " ++ show l
+showTer (Sum l _)           = "sum " ++ show l
+showTer (Undef _)           = "undefined"
+showTer (NamedSnd i e)      = showTer e ++ "." ++ show i
+showTer (NamedPair i e0 e1) = ("Cpair" ++ show i) <+> showTers [e0,e1]
 
 showTers :: [Ter] -> String
 showTers = hcat . map showTer1
@@ -377,18 +369,18 @@ instance Show Val where
   show = showVal
 
 showVal :: Val -> String
-showVal VU           = "U"
-showVal (Ter t f env) = show t <+> show env
-showVal (VId a u v)  = "Id" <+> showVal1 a <+> showVal1 u <+> showVal1 v
-showVal (VCon c us)  = c <+> showVals us
-showVal (VPi a f)    = "Pi" <+> showVals [a,f]
-showVal (VApp u v)   = showVal u <+> showVal1 v
-showVal (VSplit u v) = showVal u <+> showVal1 v
-showVal (VVar x d)   = x <+> showDim d
-showVal (VSPair u v) = "pair" <+> showVals [u,v]
-showVal (VSigma u v) = "Sigma" <+> showVals [u,v]
-showVal (VFst u)     = showVal u ++ ".1"
-showVal (VSnd u)     = showVal u ++ ".2"
+showVal VU              = "U"
+showVal (Ter t f env)   = show t <+> show env
+showVal (VId a u v)     = "Id" <+> showVal1 a <+> showVal1 u <+> showVal1 v
+showVal (VCon c us)     = c <+> showVals us
+showVal (VPi a f)       = "Pi" <+> showVals [a,f]
+showVal (VApp u v)      = showVal u <+> showVal1 v
+showVal (VSplit u v)    = showVal u <+> showVal1 v
+showVal (VVar x d)      = x <+> showDim d
+showVal (VSPair u v)    = "pair" <+> showVals [u,v]
+showVal (VSigma u v)    = "Sigma" <+> showVals [u,v]
+showVal (VFst u)        = showVal u ++ ".1"
+showVal (VSnd u)        = showVal u ++ ".2"
 showVal (VNSnd i u)     = showVal u ++ "." ++ show i
 showVal (VNSPair i u v) = "Cpair" ++ show i  <+> showVals [u,v]
 

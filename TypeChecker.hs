@@ -1,17 +1,13 @@
 module TypeChecker where
 
-import Data.Either
 import Data.Function
 import Data.List
-import Data.Maybe
-import Data.Monoid hiding (Sum)
 import Control.Monad
 import Control.Monad.Trans
 import Control.Monad.Trans.Error hiding (throwError)
 import Control.Monad.Trans.Reader
 import Control.Monad.Error (throwError)
 import Control.Applicative
-import Pretty
 
 import CTT
 import Eval
@@ -103,10 +99,7 @@ localM f r = do
   local (const a) r
 
 getFresh :: Typing Val
-getFresh = do
-  k   <- asks index
-  dom <- asks dom
-  return $ mkVar k dom
+getFresh = mkVar <$> asks index <*> asks dom
 
 checkDecls :: Decls -> Typing ()
 checkDecls d = do
@@ -152,7 +145,7 @@ check a t = case (a,t) of
   (_,Where e d) -> do
     checkDecls d
     localM (addDecls d) $ check a e
-  (VApp (VNSnd i VU) a, Lam x t) -> do
+  (VApp (VNSnd i VU) a, Lam x t) ->
     local (addTypeVal (x,a)) $ check VU t
   (VApp (VNSnd i (VPi a f)) c, Lam x (Lam y t)) -> do
     varX <- getFresh
@@ -174,7 +167,7 @@ check a t = case (a,t) of
         ai0   = appMor i0 a
         dom'  = delete i dom
         adot  = app (a `dot` i) (eval (idMor dom') rhoi0 t)
-    local (const $ TEnv k dom' rhoi0 gami0 v) $ do
+    local (const (TEnv k dom' rhoi0 gami0 v)) $ do
       check ai0 t
       check adot p
   _ -> do
@@ -226,7 +219,7 @@ checkInfer e = case e of
         let t1val = eval (idMor dom) rho t1
             t2val = eval (idMor dom) rho t2
         check (app (a `dot` i) t1val) t2
-        let fdot = (app f (VNSPair i t1val t2val)) `dot` i
+        let fdot = app f (VNSPair i t1val t2val) `dot` i
         return $ app fdot (app c t1val)
       _ -> checkInferApp t t2
   App t u -> checkInferApp t u
@@ -240,7 +233,7 @@ checkInfer e = case e of
     case c of
       VSigma a f -> do
         dom <- asks dom
-        e <- asks env
+        e   <- asks env
         let v = eval (idMor dom) e t
         return $ app f (fstSVal v)
       _          -> throwError $ show c ++ " is not a sigma-type"
@@ -255,7 +248,7 @@ checkInfer e = case e of
         rho <- asks env
         let i0 = faceMor (i:dom) i
         return $ app p (eval i0 (appMorEnv i0 rho) t)
-      VNSPair j a p | otherwise ->
+      VNSPair j a p ->
         throwError $ "checkInfer: names do not match " ++ show v ++
                      " and " ++ show i
       _ -> throwError $ "checkInfer: should be a VNSPair " ++ show v

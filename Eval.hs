@@ -1,8 +1,6 @@
 module Eval where
 
-import Control.Monad
 import Data.List
-import Data.Maybe (fromMaybe)
 
 import CTT
 
@@ -15,27 +13,28 @@ look x f r@(PDef es r1) = case lookupIdent x es of
   Nothing     -> look x f r1
 
 eval :: Morphism -> Env -> Ter -> Val
-eval f e U               = VU
-eval f e (App r s)       = app (eval f e r) (eval f e s)
-eval f e (Var i)         = snd (look i f e)
-eval f e (Pi a b)        = VPi (eval f e a) (eval f e b)
-eval f e (Lam x t)       = Ter (Lam x t) f e -- stop at lambdas
-eval f e (Sigma a b)     = VSigma (eval f e a) (eval f e b)
-eval f e (SPair a b)     = VSPair (eval f e a) (eval f e b)
-eval f e (Fst a)         = fstSVal (eval f e a)
-eval f e (Snd a)         = sndSVal (eval f e a)
-eval f e (Where t decls) = eval f (PDef [ (x,y) | (x,_,y) <- decls ] e) t
-eval f e (Con name ts)   = VCon name (map (eval f e) ts)
-eval f e (Split pr alts) = Ter (Split pr alts) f e
-eval f e (Sum pr ntss)   = Ter (Sum pr ntss) f e
+eval f e U                 = VU
+eval f e (App r s)         = app (eval f e r) (eval f e s)
+eval f e (Var i)           = snd (look i f e)
+eval f e (Pi a b)          = VPi (eval f e a) (eval f e b)
+eval f e (Lam x t)         = Ter (Lam x t) f e -- stop at lambdas
+eval f e (Sigma a b)       = VSigma (eval f e a) (eval f e b)
+eval f e (SPair a b)       = VSPair (eval f e a) (eval f e b)
+eval f e (Fst a)           = fstSVal (eval f e a)
+eval f e (Snd a)           = sndSVal (eval f e a)
+eval f e (Where t decls)   = eval f (PDef [ (x,y) | (x,_,y) <- decls ] e) t
+eval f e (Con name ts)     = VCon name (map (eval f e) ts)
+eval f e (Split pr alts)   = Ter (Split pr alts) f e
+eval f e (Sum pr ntss)     = Ter (Sum pr ntss) f e
 eval f e (NamedPair i u v) = case appMorName f i of
   Just j  -> let e' = appMorEnv (faceMor (codomain f) j) e
                  f' = minusMor i f
              in VNSPair j (eval f' e' u) (eval f' e' v)
   Nothing -> eval (minusMor i f) e u
-eval f e (NamedSnd i w)  = let (j,f') = updateMor i f in
-  eval f' e w `dot` j           -- TODO: implicit degeneracy okay?
-eval f e (Undef _)       = error "undefined"
+eval f e (NamedSnd i w)    =
+  let (j,f')               = updateMor i f
+  in eval f' e w `dot` j           -- TODO: implicit degeneracy okay?
+eval f e (Undef _)         = error "undefined"
 
 evals :: Morphism -> Env -> [(Binder,Ter)] -> [(Binder,Val)]
 evals f env bts = [ (b,eval f env t) | (b,t) <- bts ]
@@ -43,7 +42,6 @@ evals f env bts = [ (b,eval f env t) | (b,t) <- bts ]
 dot :: Val -> Name -> Val
 dot (VNSPair i u v) j | i == j = v
 dot u j = VNSnd j u
-
 
 -- TODO: Finish!
 app :: Val -> Val -> Val
@@ -67,18 +65,18 @@ appMorEnv f = mapEnv (appMor f)
 
 appMor :: Morphism -> Val -> Val
 appMor g u = case u of
-  VU         -> VU
-  VCon n vs  -> VCon n (map (appMor g) vs)
-  Ter t f e  -> Ter t (compMor f g) (appMorEnv g e)
-  VPi a f    -> VPi (appMor g a) (appMor g f)
-  VSigma a f -> VSigma (appMor g a) (appMor g f)
-  VSPair a b -> VSPair (appMor g a) (appMor g b)
-  VApp u v   -> app (appMor g u) (appMor g v)
-  VSplit u v -> app (appMor g u) (appMor g v)
-  VVar s d   -> VVar s (map (maybe Nothing (appMorName g)) d)
-  VFst p     -> fstSVal (appMor g p)
-  VSnd p     -> sndSVal (appMor g p)
-  VNSnd y p  -> appMor g p `dot` y
+  VU            -> VU
+  VCon n vs     -> VCon n (map (appMor g) vs)
+  Ter t f e     -> Ter t (compMor f g) (appMorEnv g e)
+  VPi a f       -> VPi (appMor g a) (appMor g f)
+  VSigma a f    -> VSigma (appMor g a) (appMor g f)
+  VSPair a b    -> VSPair (appMor g a) (appMor g b)
+  VApp u v      -> app (appMor g u) (appMor g v)
+  VSplit u v    -> app (appMor g u) (appMor g v)
+  VVar s d      -> VVar s (map (maybe Nothing (appMorName g)) d)
+  VFst p        -> fstSVal (appMor g p)
+  VSnd p        -> sndSVal (appMor g p)
+  VNSnd i p     -> appMor g p `dot` i
   VNSPair i a b -> let g' = minusMor i g
                    in case appMorName g i of
     Just j  -> VNSPair j (appMor g' a) (appMor g' b)
@@ -99,7 +97,7 @@ sndSVal u | isNeutral u = VSnd u
           | otherwise   = error $ show u ++ " should be neutral"
 
 conv :: Int -> [Name] -> Val -> Val -> Bool
-conv k xs VU VU                                  = True
+conv k xs VU VU                                       = True
 conv k xs (Ter (Lam x u) f e) (Ter (Lam x' u') f' e') =
   let v = mkVar k xs
   in conv (k+1) xs (eval f (Pair e (x,v)) u) (eval f' (Pair e' (x',v)) u')

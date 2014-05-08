@@ -1,5 +1,4 @@
 {-# LANGUAGE TupleSections, ParallelListComp #-}
-
 -- | Convert the concrete syntax into the syntax of cubical TT.
 module Concrete where
 
@@ -8,7 +7,6 @@ import qualified CTT as C
 import Pretty
 
 import Control.Applicative
-import Control.Monad.Trans
 import Control.Monad.Trans.Reader
 import Control.Monad.Trans.Error hiding (throwError)
 import Control.Monad.Error (throwError)
