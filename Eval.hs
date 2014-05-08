@@ -1,5 +1,6 @@
 module Eval where
 
+import Control.Monad
 import Data.List
 import Data.Maybe (fromMaybe)
 
@@ -49,29 +50,27 @@ appMorEnv :: Morphism -> Env -> Env
 appMorEnv f = mapEnv (appMor f)
 
 appMor :: Morphism -> Val -> Val
-appMor g u =
-  let appg = appMor g in case u of
+appMor g u = case u of
   VU         -> VU
   Ter t f e  -> Ter t (compMor f g) (appMorEnv g e)
-  VPi a f    -> VPi (appg a) (appg f)
-  VSigma a f -> VSigma (appg a) (appg f)
-  VSPair a b -> VSPair (appg a) (appg b)
-  VApp u v   -> app (appg u) (appg v)
-  VSplit u v -> app (appg u) (appg v)
-  VVar s d   -> VVar s (map (\x -> case x of Just y -> appMorName g y;
-                                             Nothing -> Nothing) d)
-  VFst p     -> fstSVal (appg p)
-  VSnd p     -> sndSVal (appg p)
-  VNSnd y p  -> sndNSVal y (appg p)
-  VNSPair i a b -> case appMorName g i of
-    Just j  -> VNSPair j (appMor (minusMor i g) a) (appMor (minusMor i g) b)
-    Nothing -> appMor (minusMor i g) a
+  VPi a f    -> VPi (appMor g a) (appMor g f)
+  VSigma a f -> VSigma (appMor g a) (appMor g f)
+  VSPair a b -> VSPair (appMor g a) (appMor g b)
+  VApp u v   -> app (appMor g u) (appMor g v)
+  VSplit u v -> app (appMor g u) (appMor g v)
+  VVar s d   -> VVar s (map (maybe Nothing (appMorName g)) d)
+  VFst p     -> fstSVal (appMor g p)
+  VSnd p     -> sndSVal (appMor g p)
+  VNSnd y p  -> sndNSVal y (appMor g p)
+  VNSPair i a b -> let g' = minusMor i g
+                   in case appMorName g i of
+    Just j  -> VNSPair j (appMor g' a) (appMor g' b)
+    Nothing -> appMor g' a
 
 sndNSVal :: Name -> Val -> Val
 sndNSVal i (VNSPair j a b) | i == j   = b
 sndNSVal i u | isNeutral u = VNSnd i u
              | otherwise   = error $ show u ++ " should be neutral"
-
 
 fstSVal, sndSVal :: Val -> Val
 fstSVal (VSPair a b)    = a
