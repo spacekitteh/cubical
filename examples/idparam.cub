@@ -33,4 +33,16 @@ thm2 A P z s pz ps n = (n ((x : A) *_i P x) (z ,_i pz) (s ,_i \x y -> ps x y)) .
 
 test : N
 test = thm2 N pred zero (\x -> suc x) predZero predSuc one
- 
+
+
+thm3 : (F : (A : U) -> ((A -> A) -> A) -> A)
+       (A : U)
+       (P : A -> U)
+       (y : (A -> A) -> A) ->
+       ((f : A -> A) ->
+          ((a : A) -> P a -> P (f a)) ->
+	  P (y f))
+	  ->
+       P (F A y)
+thm3 F A P y q = (F ((x : A) *_i P x) (y ,_i \g h -> q g (\a p -> h a p))) ._i
+
