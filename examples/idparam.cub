@@ -46,3 +46,14 @@ thm3 : (F : (A : U) -> ((A -> A) -> A) -> A)
        P (F A y)
 thm3 F A P y q = (F ((x : A) *_i P x) (y ,_i \g h -> q g (\a p -> h a p))) ._i
 
+F : U
+F = (X : U) (P : X -> U) (a : X) -> P a -> P a
+
+paramF : (f : F)
+         (X : U) (X' : X -> U)
+         (P : X -> U) (P' : (b : X) -> X' b -> P b -> U)
+         (a : X) (a' : X' a)
+         (p : P a) ->
+	 P' a a' p -> P' a a' (f X P a p)
+paramF f X X' P P' a a' p p' =
+  (f ((x : X) *_i X' x) (P ,_i \x y z -> P' x y z) (a,_i a') (p,_i p')) ._i
