@@ -19,8 +19,8 @@ idpp : (F : typeOfIdParam)
        (p : P a) ->
        P' a a' p -> P' (f A a) (f' A A' a a') (F f A P a p)
 idpp F f f' A A' P P' a a' p p' =
-  (F (f,_i \x y u v -> f' x (\h -> y h) u v)
-     ((x : A) *_i A' x) (P,_i \x y z -> P' x y z) (a,_i a') (p,_i p')) ._i
+  (F (f,_j \x y u v -> f' x (\h -> y h) u v)
+     ((x : A) *_j A' x) (P,_j \x y z -> P' x y z) (a,_j a') (p,_j p')) ._j
 
 N : U
 data N = zero | suc (n : N)

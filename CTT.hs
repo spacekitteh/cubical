@@ -222,10 +222,10 @@ data Env = Empty
 instance Show Env where
   show Empty            = ""
   show (PDef xas env)   = show env
-  show (Pair env (x,u)) = parens $ showEnv1 env ++ show u
+  show (Pair env ((x,_),u)) = parens $ showEnv1 env ++ x ++ "=" ++ show u
     where
-      showEnv1 (Pair env (x,u)) = showEnv1 env ++ show u ++ ", "
-      showEnv1 e                = show e
+      showEnv1 (Pair e ((x,_),u)) = showEnv1 e ++ x ++ "=" ++ show u ++ ", "
+      showEnv1 e              = show e
 
 -- instance Nominal Env where
 --   -- swap e x y = mapEnv (\u -> swap u x y) e
