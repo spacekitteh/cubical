@@ -1,7 +1,26 @@
 module idparam where
 
-thm : (f : (A : U) -> A -> A) (A : U) (P : A -> U) (a : A) -> P a -> P (f A a)
-thm f A P a q = (f ((x : A) *_i P x) (a ,_i q)) ._i
+idParam : (f : (A : U) -> A -> A)
+          (A : U) (P : A -> U) (a : A) ->
+          P a -> P (f A a)
+idParam f A P a q = (f ((x : A) *_i P x) (a ,_i q)) ._i
+
+typeOfIdParam : U
+typeOfIdParam =
+  (f : (A : U) -> A -> A)
+  (A : U) (P : A -> U) (a : A) -> P a -> P (f A a)
+
+idpp : (F : typeOfIdParam)
+       (f : (A : U) -> A -> A)
+       (f' : (A : U) (P : A -> U) (a : A) -> P a -> P (f A a))
+       (A : U) (A' : A -> U)
+       (P : A -> U) (P' : (a : A) -> A' a -> P a -> U)
+       (a : A) (a' : A' a)
+       (p : P a) ->
+       P' a a' p -> P' (f A a) (f' A A' a a') (F f A P a p)
+idpp F f f' A A' P P' a a' p p' =
+  (F (f,_i \x y u v -> f' x (\h -> y h) u v)
+     ((x : A) *_i A' x) (P,_i \x y z -> P' x y z) (a,_i a') (p,_i p')) ._i
 
 N : U
 data N = zero | suc (n : N)
