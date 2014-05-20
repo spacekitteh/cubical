@@ -348,8 +348,8 @@ showTer (Con c es)          = c <+> showTers es
 showTer (Split l _)         = "split " ++ show l
 showTer (Sum l _)           = "sum " ++ show l
 showTer (Undef _)           = "undefined"
-showTer (NamedSnd i e)      = showTer e ++ "." ++ show i
-showTer (NamedPair i e0 e1) = ("Cpair" ++ show i) <+> showTers [e0,e1]
+showTer (NamedSnd i e)      = showTer1 e ++ "." ++ show i
+showTer (NamedPair i e0 e1) = ("Cpair " ++ show i) <+> showTers [e0,e1]
 
 showTers :: [Ter] -> String
 showTers = hcat . map showTer1
