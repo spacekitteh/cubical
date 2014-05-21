@@ -69,6 +69,9 @@ data Ter = App Ter Ter
          | Undef Loc
          | NamedPair Name Ter Ter
          | NamedSnd Name Ter
+         -- for reification
+         | RSplit Loc [Brc] Tele
+         | RSum Binder LblSum Tele
   deriving Eq
 
 -- For an expression t, returns (u,ts) where u is no application
@@ -350,6 +353,8 @@ showTer (Sum l _)           = "sum " ++ show l
 showTer (Undef _)           = "undefined"
 showTer (NamedSnd i e)      = showTer1 e ++ "." ++ show i
 showTer (NamedPair i e0 e1) = ("Cpair " ++ show i) <+> showTers [e0,e1]
+showTer (RSPlit l _ _)      = "split " ++ show l
+showTer (RSum n _ _)        = "sum " ++ show n
 
 showTers :: [Ter] -> String
 showTers = hcat . map showTer1

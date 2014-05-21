@@ -140,3 +140,47 @@ conv k _ _              _               = False
 
 convEnv :: Int -> [Name] -> Env -> Env -> Bool
 convEnv k xs e e' = and $ zipWith (conv k xs) (valOfEnv e) (valOfEnv e')
+
+
+-- data Val = VU
+--          | Ter Ter Morphism Env
+--          | VPi Val Val
+--          | VId Val Val Val
+--          | VSigma Val Val
+--          | VSPair Val Val
+--          | VCon Ident [Val]
+--          | VNSPair Name Val Val
+--          | VNSnd Name Val
+--          | VApp Val Val            -- the first Val must be neutral
+--          | VSplit Val Val          -- the second Val must be neutral
+--          | VVar String Dim
+--          | VFst Val
+--          | VSnd Val
+--   deriving Eq
+
+
+reifyVal :: Int -> Val -> Ter
+reifyVal _ VU = U
+reifyVal k (Ter (Lam n t) f env) =
+  Lam n (eval f (Pair env (n, mkVar k (codomain f))) t)
+-- TODO: What about the f part?
+reifyVal k (Ter (Split loc brcs) _ env) = RSplit loc brcs (reifyEnv k env)
+reifyEnv k (Ter (Sum n lbls) _ env)     = RSum n lbls (reifyEnv k env)
+reifyVal k (VPi a f)    = Pi (reifyVal k a) (reifyVal k f)
+reifyVal k (VSigma a f) = Sigma (reifyVal k a) (reifyVal k f)
+reifyVal k (VSPair u v) = SPair (reifyVal k u) (reifyVal k v)
+reifyVal k (VCon n us)  = Con n (map (reifyVal k) us)
+reifyVal k (VNSPair i u v) = NamedPair i (reifyVal k u) (reifyVal k v)
+reifyVal k (VNSnd i u)  = NamedSnd i (reifyVal k u)
+reifyVal k (VApp u v)   = App (reifyVal k u) (reifyVal k v)
+-- TODO: Can't we throw out VSplit?!
+-- t is a split, and v neutral
+--reifyVal k (VSplit (Ter t f env) v) = App ()
+reifyVal k (VVar n dim) = Var n -- or should we anotate with dim's?
+reifyVal k (VFst u)     = Fst (reifyVal k u)
+reifyVal k (VSnd u)     = Snd (reifyVal k u)
+
+reifyEnv :: Int -> Env -> Tele
+reifyEnv _ Empty = []
+reifyEnv k (Pair e (x,v)) = (x,reifyEnv k v) : reifyEnv k e
+reifyEnv k (PDef _ e)     = reifyEnv k e
