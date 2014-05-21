@@ -76,7 +76,8 @@ appMor g u = case u of
   VVar s d      -> VVar s (map (maybe Nothing (appMorName g)) d)
   VFst p        -> fstSVal (appMor g p)
   VSnd p        -> sndSVal (appMor g p)
-  VNSnd i p     -> appMor g p `dot` i
+  VNSnd i p     -> let (j,g') = updateMor i g
+                   in appMor g' p `dot` j
   VNSPair i a b -> let g' = minusMor i g
                    in case appMorName g i of
     Just j  -> VNSPair j (appMor g' a) (appMor g' b)
