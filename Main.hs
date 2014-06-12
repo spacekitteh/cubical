@@ -111,6 +111,24 @@ loop flags f names tenv@(TC.TEnv _ dom rho _ _) = do
     Just (':':'c':'d':' ':str) -> do lift (setCurrentDirectory str)
                                      loop flags f names tenv
     Just ":h"  -> outputStrLn help >> loop flags f names tenv
+    -- TODO: clean up copy-paste style..
+    Just (':':'e':' ':str) -> case pExp (lexer str) of
+      Bad err -> outputStrLn ("Parse error: " ++ err) >> loop flags f names tenv
+      Ok  exp ->
+        case runResolver $ local (insertBinders names) $ resolveExp exp of
+          Left  err  -> do outputStrLn ("Resolver failed: " ++ err)
+                           loop flags f names tenv
+          Right body -> do
+          x <- liftIO $ TC.runInfer tenv body
+          case x of
+            Left err -> do outputStrLn ("Could not type-check: " ++ err)
+                           loop flags f names tenv
+            Right _  -> do
+              let e  = E.eval (C.idMor dom) rho body
+              let re = E.reifyVal 0 e
+              outputStrLn ("REIFY: " ++ show re)
+              loop flags f names tenv
+
     Just str   -> case pExp (lexer str) of
       Bad err -> outputStrLn ("Parse error: " ++ err) >> loop flags f names tenv
       Ok  exp ->

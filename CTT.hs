@@ -153,7 +153,6 @@ gensyms d = allSyms \\ d
 data Val = VU
          | Ter Ter Morphism Env
          | VPi Val Val
-         | VId Val Val Val
          | VSigma Val Val
          | VSPair Val Val
          | VCon Ident [Val]
@@ -305,6 +304,11 @@ faceMor domain i
        (\j -> if i == j then Nothing else Just j)
   | otherwise       = error $ "faceMor: " ++ show i ++ " not in domain"
 
+-- degeneracy morphism with codomain i:domain (i not in domain)
+degMor :: [Name] -> Name -> Morphism
+degMor domain i =
+  Morphism domain (i:domain) Just
+
 -- f : I,i -> J,f(i)
 -- f - i : I -> J
 minusMor :: Name -> Morphism -> Morphism
@@ -353,19 +357,21 @@ showTer (Sum l _)           = "sum " ++ show l
 showTer (Undef _)           = "undefined"
 showTer (NamedSnd i e)      = showTer1 e ++ "." ++ show i
 showTer (NamedPair i e0 e1) = ("Cpair " ++ show i) <+> showTers [e0,e1]
-showTer (RSPlit l _ _)      = "split " ++ show l
+showTer (RSplit l _ _)      = "split " ++ show l
 showTer (RSum n _ _)        = "sum " ++ show n
 
 showTers :: [Ter] -> String
 showTers = hcat . map showTer1
 
 showTer1 :: Ter -> String
-showTer1 U           = "U"
-showTer1 (Con c [])  = c
-showTer1 (Var x)     = x
-showTer1 u@(Split{}) = showTer u
-showTer1 u@(Sum{})   = showTer u
-showTer1 u           = parens $ showTer u
+showTer1 U            = "U"
+showTer1 (Con c [])   = c
+showTer1 (Var x)      = x
+showTer1 u@(Split{})  = showTer u
+showTer1 u@(Sum{})    = showTer u
+showTer1 u@(RSplit{}) = showTer u
+showTer1 u@(RSum{})   = showTer u
+showTer1 u            = parens $ showTer u
 
 showDecls :: Decls -> String
 showDecls defs = ccat (map (\((x,_),_,d) -> x <+> "=" <+> show d) defs)
@@ -376,7 +382,6 @@ instance Show Val where
 showVal :: Val -> String
 showVal VU              = "U"
 showVal (Ter t f env)   = show t <+> show env
-showVal (VId a u v)     = "Id" <+> showVal1 a <+> showVal1 u <+> showVal1 v
 showVal (VCon c us)     = c <+> showVals us
 showVal (VPi a f)       = "Pi" <+> showVals [a,f]
 showVal (VApp u v)      = showVal u <+> showVal1 v

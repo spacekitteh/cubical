@@ -33,7 +33,7 @@ eval f e (NamedPair i u v) = case appMorName f i of
   Nothing -> eval (minusMor i f) e u
 eval f e (NamedSnd i w)    =
   let (j,f')               = updateMor i f
-  in eval f' e w `dot` j           -- TODO: implicit degeneracy okay?
+  in eval f' (appMorEnv (degMor (codomain f) j) e) w `dot` j
 eval f e (Undef _)         = error "undefined"
 
 evals :: Morphism -> Env -> [(Binder,Ter)] -> [(Binder,Val)]
@@ -53,8 +53,12 @@ app (Ter (Split _ nvs) f e) (VCon name us) = case lookup name nvs of
 app u@(Ter (Split _ _) _ _) v | isNeutral v = VSplit u v -- v should be neutral
                             | otherwise   = error $ "app: VSplit " ++ show v
                                                   ++ " is not neutral"
-app (VNSPair i u v) (VNSPair i' a b) | i == i' =
-  VNSPair i (app u a) (app (app v a) b)
+app (VNSPair i u v) (VNSPair i' a b)
+  | i == i'   = VNSPair i (app u a) (app (app v a) b)
+-- WIP:
+-- app (VNSPair i u v) w =
+--   let wi0 = appMor (faceMor )
+--   VNSPair i (app )
 app r s = VApp r s
 -- TODO: fix neutral and use:
 -- app r s | isNeutral r = VApp r s -- r should be neutral
@@ -142,30 +146,15 @@ convEnv :: Int -> [Name] -> Env -> Env -> Bool
 convEnv k xs e e' = and $ zipWith (conv k xs) (valOfEnv e) (valOfEnv e')
 
 
--- data Val = VU
---          | Ter Ter Morphism Env
---          | VPi Val Val
---          | VId Val Val Val
---          | VSigma Val Val
---          | VSPair Val Val
---          | VCon Ident [Val]
---          | VNSPair Name Val Val
---          | VNSnd Name Val
---          | VApp Val Val            -- the first Val must be neutral
---          | VSplit Val Val          -- the second Val must be neutral
---          | VVar String Dim
---          | VFst Val
---          | VSnd Val
---   deriving Eq
-
-
 reifyVal :: Int -> Val -> Ter
 reifyVal _ VU = U
-reifyVal k (Ter (Lam n t) f env) =
-  Lam n (eval f (Pair env (n, mkVar k (codomain f))) t)
+reifyVal k (Ter (Lam n@(id,loc) t) f env) =
+--  Lam n $ reifyVal (k+1) $ eval f (Pair env (n, mkVar k (codomain f))) t
+  let cod = map Just (codomain f) in
+  Lam (id ++ show cod,loc) $ reifyVal (k+1) $ eval f (Pair env (n, VVar id cod)) t
 -- TODO: What about the f part?
 reifyVal k (Ter (Split loc brcs) _ env) = RSplit loc brcs (reifyEnv k env)
-reifyEnv k (Ter (Sum n lbls) _ env)     = RSum n lbls (reifyEnv k env)
+reifyVal k (Ter (Sum n lbls) _ env)     = RSum n lbls (reifyEnv k env)
 reifyVal k (VPi a f)    = Pi (reifyVal k a) (reifyVal k f)
 reifyVal k (VSigma a f) = Sigma (reifyVal k a) (reifyVal k f)
 reifyVal k (VSPair u v) = SPair (reifyVal k u) (reifyVal k v)
@@ -176,11 +165,11 @@ reifyVal k (VApp u v)   = App (reifyVal k u) (reifyVal k v)
 -- TODO: Can't we throw out VSplit?!
 -- t is a split, and v neutral
 --reifyVal k (VSplit (Ter t f env) v) = App ()
-reifyVal k (VVar n dim) = Var n -- or should we anotate with dim's?
+reifyVal k (VVar n dim) = Var (n ++ show dim) -- or should we anotate with dim's?
 reifyVal k (VFst u)     = Fst (reifyVal k u)
 reifyVal k (VSnd u)     = Snd (reifyVal k u)
 
 reifyEnv :: Int -> Env -> Tele
 reifyEnv _ Empty = []
-reifyEnv k (Pair e (x,v)) = (x,reifyEnv k v) : reifyEnv k e
+reifyEnv k (Pair e (x,v)) = (x,reifyVal k v) : reifyEnv k e
 reifyEnv k (PDef _ e)     = reifyEnv k e
