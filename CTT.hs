@@ -49,7 +49,7 @@ declDefs decl = [ (x,d) | (x,_,d) <- decl]
 -- Terms
 data Ter = App Ter Ter
          | Pi Ter Ter
-         | Lam Binder Ter
+         | Lam Binder Ter Ter
          | Sigma Ter Ter
          | SPair Ter Ter
          | Fst Ter
@@ -70,8 +70,8 @@ mkApps :: Ter -> [Ter] -> Ter
 mkApps (Con l us) vs = Con l (us ++ vs)
 mkApps t ts          = foldl App t ts
 
-mkLams :: [String] -> Ter -> Ter
-mkLams bs t = foldr Lam t [ noLoc b | b <- bs ]
+-- mkLams :: [String] -> Ter -> Ter
+-- mkLams bs t = foldr Lam t [ noLoc b | b <- bs ]
 
 mkWheres :: [Decls] -> Ter -> Ter
 mkWheres []     e = e
@@ -144,20 +144,20 @@ instance Show Ter where
   show = showTer
 
 showTer :: Ter -> String
-showTer U             = "U"
-showTer (App e0 e1)   = showTer e0 <+> showTer1 e1
-showTer (Pi e0 e1)    = "Pi" <+> showTers [e0,e1]
-showTer (Lam (x,_) e) = '\\' : x <+> "->" <+> showTer e
-showTer (Fst e)       = showTer e ++ ".1"
-showTer (Snd e)       = showTer e ++ ".2"
-showTer (Sigma e0 e1) = "Sigma" <+> showTers [e0,e1]
-showTer (SPair e0 e1) = "pair" <+> showTers [e0,e1]
-showTer (Where e d)   = showTer e <+> "where" <+> showDecls d
-showTer (Var x)       = x
-showTer (Con c es)    = c <+> showTers es
-showTer (Split l _)   = "split " ++ show l
-showTer (Sum l _)     = "sum " ++ show l
-showTer (Undef _)     = "undefined"
+showTer U               = "U"
+showTer (App e0 e1)     = showTer e0 <+> showTer1 e1
+showTer (Pi e0 e1)      = "Pi" <+> showTers [e0,e1]
+showTer (Lam (x,_) t e) = '\\' : x <+> ":" <+> showTer t <+> "->" <+> showTer e
+showTer (Fst e)         = showTer e ++ ".1"
+showTer (Snd e)         = showTer e ++ ".2"
+showTer (Sigma e0 e1)   = "Sigma" <+> showTers [e0,e1]
+showTer (SPair e0 e1)   = "pair" <+> showTers [e0,e1]
+showTer (Where e d)     = showTer e <+> "where" <+> showDecls d
+showTer (Var x)         = x
+showTer (Con c es)      = c <+> showTers es
+showTer (Split l _)     = "split " ++ show l
+showTer (Sum l _)       = "sum " ++ show l
+showTer (Undef _)       = "undefined"
 
 showTers :: [Ter] -> String
 showTers = hcat . map showTer1

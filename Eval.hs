@@ -18,7 +18,7 @@ eval e U               = VU
 eval e (App r s)       = app (eval e r) (eval e s)
 eval e (Var i)         = snd (look i e)
 eval e (Pi a b)        = VPi (eval e a) (eval e b)
-eval e (Lam x t)       = Ter (Lam x t) e -- stop at lambdas
+eval e (Lam x t u)     = Ter (Lam x t u) e -- stop at lambdas
 eval e (Sigma a b)     = VSigma (eval e a) (eval e b)
 eval e (SPair a b)     = VSPair (eval e a) (eval e b)
 eval e (Fst a)         = fstSVal (eval e a)
@@ -33,7 +33,7 @@ evals :: Env -> [(Binder,Ter)] -> [(Binder,Val)]
 evals env bts = [ (b,eval env t) | (b,t) <- bts ]
 
 app :: Val -> Val -> Val
-app (Ter (Lam x t) e) u = eval (Pair e (x,u)) t
+app (Ter (Lam x _ t) e) u = eval (Pair e (x,u)) t
 app (Ter (Split _ nvs) e) (VCon name us) = case lookup name nvs of
     Just (xs,t) -> eval (upds e (zip xs us)) t
     Nothing -> error $ "app: Split with insufficient arguments; " ++
@@ -55,13 +55,13 @@ sndSVal u | isNeutral u = VSnd u
 -- conversion test
 conv :: Int -> Val -> Val -> Bool
 conv k VU VU                                  = True
-conv k (Ter (Lam x u) e) (Ter (Lam x' u') e') = do
+conv k (Ter (Lam x _ u) e) (Ter (Lam x' _ u') e') = do
   let v = mkVar k
   conv (k+1) (eval (Pair e (x,v)) u) (eval (Pair e' (x',v)) u')
-conv k (Ter (Lam x u) e) u' = do
+conv k (Ter (Lam x _ u) e) u' = do
   let v = mkVar k
   conv (k+1) (eval (Pair e (x,v)) u) (app u' v)
-conv k u' (Ter (Lam x u) e) = do
+conv k u' (Ter (Lam x _ u) e) = do
   let v = mkVar k
   conv (k+1) (app u' v) (eval (Pair e (x,v)) u)
 conv k (Ter (Split p _) e) (Ter (Split p' _) e') =

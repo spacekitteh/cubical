@@ -121,10 +121,10 @@ check a t = case (a,t) of
   (_,Con c es) -> do
     (bs,nu) <- getLblType c a
     checks (bs,nu) es
-  (VU,Pi a (Lam x b)) -> do
+  (VU,Pi a (Lam x _ b)) -> do -- TODO: Fix
     check VU a
     localM (addType (x,a)) $ check VU b
-  (VU,Sigma a (Lam x b)) -> do
+  (VU,Sigma a (Lam x _ b)) -> do -- TODO: Fix
     check VU a
     localM (addType (x,a)) $ check VU b
   (VU,Sum _ bs) -> sequence_ [checkTele as | (_,as) <- bs]
@@ -135,7 +135,7 @@ check a t = case (a,t) of
        then sequence_ [ checkBranch (as,nu) f brc
                       | (brc, (_,as)) <- zip ces' cas' ]
        else throwError "case branches does not match the data type"
-  (VPi a f,Lam x t)  -> do
+  (VPi a f,Lam x _ t)  -> do
     var <- getFresh
     local (addTypeVal (x,a)) $ check (app f var) t
   (VSigma a f, SPair t1 t2) -> do

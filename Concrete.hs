@@ -117,13 +117,13 @@ resolveBinder :: AIdent -> Resolver C.Binder
 resolveBinder (AIdent (l,x)) = (x,) <$> getLoc l
 
 -- Eta expand constructors
-expandConstr :: Arity -> String -> [Exp] -> Resolver Ter
-expandConstr a x es = do
-  let r       = a - length es
-      binders = map (('_' :) . show) [1..r]
-      args    = map C.Var binders
-  ts <- mapM resolveExp es
-  return $ C.mkLams binders $ C.mkApps (C.Con x []) (ts ++ args)
+-- expandConstr :: Arity -> String -> [Exp] -> Resolver Ter
+-- expandConstr a x es = do
+--   let r       = a - length es
+--       binders = map (('_' :) . show) [1..r]
+--       args    = map C.Var binders
+--   ts <- mapM resolveExp es
+--   return $ C.mkLams binders $ C.mkApps (C.Con x []) (ts ++ args)
 
 resolveVar :: AIdent -> Resolver Ter
 resolveVar (AIdent (l,x))
@@ -133,16 +133,19 @@ resolveVar (AIdent (l,x))
     vars    <- getVariables
     case C.getIdent x vars of
       Just Variable        -> return $ C.Var x
-      Just (Constructor a) -> expandConstr a x []
+      -- Just (Constructor a) -> expandConstr a x []
+      Just (Constructor a) -> C.Con x []
       _ -> throwError $
         "Cannot resolve variable" <+> x <+> "at position" <+>
         show l <+> "in module" <+> modName
 
-lam :: AIdent -> Resolver Ter -> Resolver Ter
-lam a e = do x <- resolveBinder a; C.Lam x <$> local (insertVar x) e
+lam :: AIdent -> Resolver Ter -> Resolver Ter -> Resolver Ter
+lam a t e = do 
+  x <- resolveBinder a
+  C.Lam x <$> local (insertVar x) t <*> local (insertVar x) e
 
-lams :: [AIdent] -> Resolver Ter -> Resolver Ter
-lams = flip $ foldr lam
+-- lams :: [AIdent] -> Resolver Ter -> Resolver Ter
+-- lams = flip $ foldr lam
 
 bind :: (Ter -> Ter -> Ter) -> (AIdent, Exp) -> Resolver Ter -> Resolver Ter
 bind f (x,t) e = f <$> resolveExp t <*> lam x e
@@ -154,13 +157,13 @@ resolveExp :: Exp -> Resolver Ter
 resolveExp U            = return C.U
 resolveExp (Var x)      = resolveVar x
 resolveExp (App t s)    = case unApps t [s] of
-  (x@(Var (AIdent (_,n))),xs) -> do
-    -- Special treatment in the case of a constructor in order not to
-    -- eta expand too much
-    vars    <- getVariables
-    case C.getIdent n vars of
-      Just (Constructor a) -> expandConstr a n xs
-      _ -> C.mkApps <$> resolveExp x <*> mapM resolveExp xs
+  -- (x@(Var (AIdent (_,n))),xs) -> do
+  --   -- Special treatment in the case of a constructor in order not to
+  --   -- eta expand too much
+  --   vars    <- getVariables
+  --   case C.getIdent n vars of
+  --     Just (Constructor a) -> expandConstr a n xs
+  --     _ -> C.mkApps <$> resolveExp x <*> mapM resolveExp xs
   (x,xs) -> C.mkApps <$> resolveExp x <*> mapM resolveExp xs
 
 resolveExp (Sigma t b)  = case pseudoTele t of
@@ -170,7 +173,7 @@ resolveExp (Pi t b)     =  case pseudoTele t of
   Just tele -> binds C.Pi tele (resolveExp b)
   Nothing   -> throwError "Telescope malformed in Pigma"
 resolveExp (Fun a b)    = bind C.Pi (AIdent ((0,0),"_"), a) (resolveExp b)
-resolveExp (Lam x xs t) = lams (x:xs) (resolveExp t)
+resolveExp (Lam x t e)  = lam x (resolveExp t) (resolveExp e)
 resolveExp (Fst t)      = C.Fst <$> resolveExp t
 resolveExp (Snd t)      = C.Snd <$> resolveExp t
 resolveExp (Pair t0 t1) = C.SPair <$> resolveExp t0 <*> resolveExp t1
