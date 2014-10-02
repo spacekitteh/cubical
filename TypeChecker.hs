@@ -26,7 +26,7 @@ data TEnv = TEnv { index   :: Int   -- for de Bruijn levels
                  , verbose :: Bool  -- Should it be verbose and print
                                     -- what it typechecks?
                  }
-  deriving (Eq,Show)
+  deriving (Show)
 
 verboseEnv, silentEnv :: TEnv
 verboseEnv = TEnv 0 Empty [] True
@@ -128,7 +128,7 @@ check a t = case (a,t) of
     check VU a
     localM (addType (x,a)) $ check VU b
   (VU,Sum _ bs) -> sequence_ [checkTele as | (_,as) <- bs]
-  (VPi (Ter (Sum _ cas) nu) f,Split _ ces) -> do
+  (VPi (VSum _ cas) nu f,Split _ ces) -> do
     let cas' = sortBy (compare `on` fst . fst) cas
         ces' = sortBy (compare `on` fst) ces
     if map (fst . fst) cas' == map fst ces'
