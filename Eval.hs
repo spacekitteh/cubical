@@ -47,7 +47,8 @@ face i t = case t of
   VSnd a -> VSnd (face i a)
   VCPair j a b ty | j == i -> a
                   | otherwise -> VCPair j (face i a) (face i b) (face i ty)
-  VParam f -> VParam $ \c -> face i (f c)
+  VParam j v -> VParam k (face i (v `swap` (j,k)))
+    where k = fresh (v,i,j)
   VVar x -> VVar x
 
 vpi a b = VPi a $ Ter a b
@@ -63,8 +64,8 @@ paramT i (VCPair j a b VU) xx | i == j = b
 paramT i (VSigma a b) xx = vSig (paramT i a (face i xx)) $ \xj -> param i b `app` (face i xx) `app` xj `app` (param i xx)
 paramT i t x = param i t `app` x
 
-substCol :: Color -> Color -> Val -> Val
-substCol = error "color substitution not implemented"
+-- substCol :: Color -> Color -> Val -> Val
+-- substCol = error "color substitution not implemented"
 
 param :: Color -> Val -> Val
 param i t = case t of
@@ -75,17 +76,17 @@ param i t = case t of
   VFst a -> VFst (param i a)
   VSnd a -> VSnd (param i a)
   VVar _ -> stop
-  VParam _ -> stop
+  VParam _ _ -> stop
   VApp _ _ -> stop
   VCPair _ _ _ VU -> typ
   VPi _ _ -> typ
   VSigma _ _ -> typ
   VU -> typ
- where stop = VParam (\c -> substCol i c t)
+ where stop = VParam i t
        typ = Ter (face i t) $ \x -> paramT i t x
 
 app :: Val -> Val -> Val
-app (VApp (VParam f) a) ai = VParam $ \c -> (f c `app` (VCPair c a ai (error "TYPE HEERE!")))
+app (VApp (VParam i f) a) ai = VParam i (f `app` (VCPair i a ai (error "TYPE HEERE!")))
 app (VCPair i f g (VPi _a b)) u = VCPair i (app f (face i u)) ((g `app` (face i u)) `app` param i u) (b `app` u)
 app (Ter _ f) u = f u
 -- app (Ter (Split _ nvs) e) (VCon name us) = case lookup name nvs of

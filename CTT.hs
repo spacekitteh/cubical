@@ -1,3 +1,4 @@
+{-# LANGUAGE TypeSynonymInstances, FlexibleInstances, OverlappingInstances #-}
 module CTT where
 
 import Control.Applicative
@@ -46,7 +47,47 @@ declTele decl = [ (x,t) | (x,t,_) <- decl]
 declDefs :: Decls -> [(Binder,Ter)]
 declDefs decl = [ (x,d) | (x,_,d) <- decl]
 
+
+gensym :: [Color] -> Color
+gensym xs = head $ (map show [0..]) \\ xs
+
+gensyms :: [Color] -> [Color]
+gensyms d = let x = gensym d in x : gensyms (x : d)
+
+class Nominal a where
+  swap :: a -> (Color,Color) -> a
+  support :: a -> [Color]
+
+fresh :: Nominal a => a -> Color
+fresh = gensym . support
+
+freshs :: Nominal a => a -> [Color]
+freshs = gensyms . support
+
 type Color = String
+
+instance Nominal Color where
+  swap k (i,j) | k == i = j
+               | k == j = i
+               | otherwise = k
+
+  support i = [i]
+
+instance (Nominal a, Nominal b) => Nominal (a, b) where
+  support (a, b) = support a `union` support b
+  swap (a, b) xy = (swap a xy, swap b xy)
+
+instance (Nominal a, Nominal b, Nominal c) => Nominal (a, b, c) where
+  support (a, b,c) = support a `union` support b `union` support c
+  swap (a, b,c) xy = (swap a xy, swap b xy,swap c xy)
+
+instance Nominal a => Nominal [a] where
+  support vs = foldr union [] (map support vs)
+  swap vs xy = [swap v xy | v <- vs]
+
+instance Nominal a => Nominal (Maybe a) where
+  support = maybe [] support
+  swap v xy = fmap (\u -> swap u xy) v
 
 -- Terms
 data Ter = App Ter Ter
@@ -95,7 +136,7 @@ data Val = VU
          | VFst Val
          | VSnd Val
          | VCPair Color Val Val Val
-         | VParam (Color -> Val)
+         | VParam Color Val -- (Color -> Val)
   -- deriving Eq
 
 mkVar :: Int -> Val
@@ -108,6 +149,39 @@ isNeutral (VVar _)     = True
 isNeutral (VFst v)     = isNeutral v
 isNeutral (VSnd v)     = isNeutral v
 isNeutral _            = False
+
+instance Nominal Val where
+  support VU = []
+  support (Ter t e) = support (t,e (VVar "fresh"))
+  support (VCPair i a b t) = support (i,[a,b,t])
+  support (VParam x v) = delete x $ support v
+  support (VPi v1 v2) = support [v1,v2]
+  support (VCon _ vs) = support vs
+  support (VApp u v) = support (u, v)
+  support (VSplit u v) = support (u, v)
+  support (VVar _) = []
+  support (VSigma u v) = support (u,v)
+  support (VSPair u v) = support (u,v)
+  support (VFst u) = support u
+  support (VSnd u) = support u
+  support v = error ("support " ++ show v)
+
+  swap u ij =
+    let sw u = swap u ij
+    in case u of
+      VU -> VU
+      Ter t e -> Ter t (\x -> sw (e x))
+      VPi a f -> VPi (sw a) (sw f)
+      VParam k v -> VParam (sw k) (sw v)
+      VCPair i a b t -> VCPair (sw i) (sw a) (sw b) (sw t)
+      VSigma a f -> VSigma (sw a) (sw f)
+      VSPair u v -> VSPair (sw u) (sw v)
+      VFst u -> VFst (sw u)
+      VSnd u -> VSnd (sw u)
+      VCon c vs -> VCon c (sw vs)
+      VVar x -> VVar x
+      VApp u v -> VApp (sw u) (sw v)
+      VSplit u v -> VSplit (sw u) (sw v)
 
 --------------------------------------------------------------------------------
 -- | Environments
