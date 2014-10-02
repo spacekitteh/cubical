@@ -46,6 +46,8 @@ declTele decl = [ (x,t) | (x,t,_) <- decl]
 declDefs :: Decls -> [(Binder,Ter)]
 declDefs decl = [ (x,d) | (x,_,d) <- decl]
 
+type Color = String
+
 -- Terms
 data Ter = App Ter Ter
          | Pi Ter Ter
@@ -57,6 +59,7 @@ data Ter = App Ter Ter
          | Where Ter Decls
          | Var Ident
          | U
+         | Param Color Ter
          -- constructor c Ms
          | Con Label [Ter]
          -- branches c1 xs1  -> M1,..., cn xsn -> Mn
@@ -81,7 +84,7 @@ mkWheres (d:ds) e = Where (mkWheres ds e) d
 -- | Values
 
 data Val = VU
-         | Ter Ter Env
+         | Ter Val {- type -} (Val -> Val) -- Better name: Closure
          | VPi Val Val
          | VSigma Val Val
          | VSPair Val Val
@@ -91,7 +94,9 @@ data Val = VU
          | VVar String
          | VFst Val
          | VSnd Val
-  deriving Eq
+         | VCPair Color Val Val Val
+         | VParam (Color -> Val)
+  -- deriving Eq
 
 mkVar :: Int -> Val
 mkVar k = VVar ('X' : show k)
@@ -110,7 +115,7 @@ isNeutral _            = False
 data Env = Empty
          | Pair Env (Binder,Val)
          | PDef [(Binder,Ter)] Env
-  deriving Eq
+  -- deriving Eq
 
 instance Show Env where
   show Empty            = ""
@@ -178,7 +183,8 @@ instance Show Val where
 
 showVal :: Val -> String
 showVal VU           = "U"
-showVal (Ter t env)  = show t <+> show env
+showVal (Ter t e)  = '\\' : showVal x <+> ":" <+> showVal t <+> "->" <+> showVal (e x)
+  where x = VVar "fresh"
 showVal (VCon c us)  = c <+> showVals us
 showVal (VPi a f)    = "Pi" <+> showVals [a,f]
 showVal (VApp u v)   = showVal u <+> showVal1 v
