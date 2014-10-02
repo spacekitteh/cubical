@@ -33,8 +33,8 @@ verboseEnv = TEnv 0 Empty [] True
 silentEnv  = TEnv 0 Empty [] False
 
 addTypeVal :: (Binder,Val) -> TEnv -> TEnv
-addTypeVal p@(x,_) (TEnv k rho gam v) =
-  TEnv (k+1) (Pair rho (x,mkVar k)) (p:gam) v
+addTypeVal p@(x,ty) (TEnv k rho gam v) =
+  TEnv (k+1) (Pair rho (x,mkVar k ty)) (p:gam) v
 
 addType :: (Binder,Ter) -> TEnv -> Typing TEnv
 addType (x,a) tenv@(TEnv _ rho _ _) = return $ addTypeVal (x,eval rho a) tenv
@@ -43,10 +43,16 @@ addC :: Ctxt -> (Tele,Env) -> [(Binder,Val)] -> Typing Ctxt
 addC gam _             []          = return gam
 addC gam ((y,a):as,nu) ((x,u):xus) = 
   addC ((x,eval nu a):gam) (as,Pair nu (y,u)) xus
+ 
 
-addBranch :: [(Binder,Val)] -> (Tele,Env) -> TEnv -> Typing TEnv
-addBranch nvs (tele,env) (TEnv k rho gam v) = do
-  e <- addC gam (tele,env) nvs
+addCV :: Ctxt -> VTele -> [(Binder,Val)] -> Typing Ctxt
+addCV gam _             []          = return gam
+addCV gam (VCons a as) ((x,u):xus) = 
+  addCV ((x,a):gam) (as $ VVar "FIXME" a) xus
+
+addBranch :: [(Binder,Val)] -> VTele -> TEnv -> Typing TEnv
+addBranch nvs tele (TEnv k rho gam v) = do
+  e <- addCV gam tele nvs
   return $ TEnv (k + length nvs) (upds rho nvs) e v
 
 addDecls :: Decls -> TEnv -> Typing TEnv
@@ -84,10 +90,10 @@ runDeclss tenv (d:ds) = do
 runInfer :: TEnv -> Ter -> IO (Either String Val)
 runInfer lenv e = runTyping lenv (checkInfer e)
 
--- Extract the type of a label as a closure
-getLblType :: String -> Val -> Typing (Tele, Env)
-getLblType c (Ter (Sum _ cas) r) = case getIdent c cas of
-  Just as -> return (as,r)
+-- Extract the type of a label
+getLblType :: String -> Val -> Typing VTele
+getLblType c (VSum _ cas) = case getIdent c cas of
+  Just as -> return as
   Nothing -> throwError ("getLblType " ++ show c)
 getLblType c u = throwError ("expected a data type for the constructor "
                              ++ c ++ " but got " ++ show u)
@@ -99,8 +105,8 @@ localM f r = do
   a <- f e
   local (const a) r
 
-getFresh :: Typing Val
-getFresh = mkVar <$> index <$> ask
+getFresh :: Val -> Typing Val
+getFresh ty = flip mkVar ty <$> index <$> ask
 
 checkDecls :: Decls -> Typing ()
 checkDecls d = do
@@ -119,8 +125,8 @@ checkTele ((x,a):xas) = do
 check :: Val -> Ter -> Typing ()
 check a t = case (a,t) of
   (_,Con c es) -> do
-    (bs,nu) <- getLblType c a
-    checks (bs,nu) es
+    bs <- getLblType c a
+    checksV bs es
   (VU,Pi a (Lam x _ b)) -> do -- TODO: Fix
     check VU a
     localM (addType (x,a)) $ check VU b
@@ -128,15 +134,15 @@ check a t = case (a,t) of
     check VU a
     localM (addType (x,a)) $ check VU b
   (VU,Sum _ bs) -> sequence_ [checkTele as | (_,as) <- bs]
-  (VPi (VSum _ cas) nu f,Split _ ces) -> do
+  (VPi (VSum _ cas) f,Split _ ces) -> do
     let cas' = sortBy (compare `on` fst . fst) cas
         ces' = sortBy (compare `on` fst) ces
     if map (fst . fst) cas' == map fst ces'
-       then sequence_ [ checkBranch (as,nu) f brc
+       then sequence_ [ checkBranch as f brc
                       | (brc, (_,as)) <- zip ces' cas' ]
        else throwError "case branches does not match the data type"
   (VPi a f,Lam x _ t)  -> do
-    var <- getFresh
+    var <- getFresh a
     local (addTypeVal (x,a)) $ check (app f var) t
   (VSigma a f, SPair t1 t2) -> do
     check a t1
@@ -153,13 +159,12 @@ check a t = case (a,t) of
     unless (conv k v a) $
       throwError $ "check conv: " ++ show v ++ " /= " ++ show a
 
-checkBranch :: (Tele,Env) -> Val -> Brc -> Typing ()
-checkBranch (xas,nu) f (c,(xs,e)) = do
+checkBranch :: VTele -> Val -> Brc -> Typing ()
+checkBranch xas f (c,(xs,e)) = do
   k   <- asks index
   env <- asks env
-  let l  = length xas
-      us = map mkVar [k..k+l-1]
-  localM (addBranch (zip xs us) (xas,nu)) $ check (app f (VCon c us)) e
+  let us = mkTele k xas
+  localM (addBranch (zip xs us) xas) $ check (app f (VCon c us)) e
 
 checkInfer :: Ter -> Typing Val
 checkInfer e = case e of
@@ -194,22 +199,32 @@ checkInfer e = case e of
   Where t d -> do
     checkDecls d
     localM (addDecls d) $ checkInfer t
-  VParam i t -> do
+  Param i t -> do
     ty <- checkInfer t
     e <- env <$> ask
-    f <- face i <$> eval e t
+    let f = face i $ eval e t
     return $ paramT i ty f
   _ -> throwError ("checkInfer " ++ show e)
 
 checks :: (Tele,Env) -> [Ter] -> Typing ()
 checks _              []     = return ()
 checks ((x,a):xas,nu) (e:es) = do
-  let v = eval nu a
+   let v = eval nu a
+   check v e
+   rho <- asks env
+   let v' = eval rho e
+   checks (xas,Pair nu (x,v')) es
+checks _              _      = throwError "checks"
+
+checksV :: VTele -> [Ter] -> Typing ()
+checksV _              []     = return ()
+checksV (VCons a xas) (e:es) = do
+  let v = a
   check v e
   rho <- asks env
   let v' = eval rho e
-  checks (xas,Pair nu (x,v')) es
-checks _              _      = throwError "checks"
+  checksV (xas v') es
+checksV _              _      = throwError "checks"
 
 -- Not used since we have U : U
 --

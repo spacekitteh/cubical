@@ -26,7 +26,11 @@ type VBrc    = (Label,([Binder],Val))
 
 -- Telescope (x1 : A1) .. (xn : An)
 type Tele   = [(Binder,Ter)]
-type VTele  = [(Binder,Val)]
+data VTele  = VNil | VCons Val (Val -> VTele)
+
+mkTele k VNil = []
+mkTele k (VCons ty tele) = v : mkTele (k+1) (tele v)
+  where v = mkVar k ty
 
 -- Labelled sum: c (x1 : A1) .. (xn : An)
 type LblSum  = [(Binder,Tele)]
@@ -135,7 +139,7 @@ data Val = VU
          | VCon Ident [Val]
          | VApp Val Val            -- the first Val must be neutral
          | VSplit Val Val          -- the second Val must be neutral
-         | VVar String
+         | VVar String Val {- type -}
          | VFst Val
          | VSnd Val
          | VCPair Color Val Val Val
@@ -144,27 +148,27 @@ data Val = VU
          | VSum Binder VLblSum
   -- deriving Eq
 
-mkVar :: Int -> Val
-mkVar k = VVar ('X' : show k)
+mkVar :: Int -> Val -> Val
+mkVar k ty = VVar ('X' : show k) ty
 
 isNeutral :: Val -> Bool
 isNeutral (VApp u _)   = isNeutral u
 isNeutral (VSplit _ v) = isNeutral v
-isNeutral (VVar _)     = True
+isNeutral (VVar _ _)   = True
 isNeutral (VFst v)     = isNeutral v
 isNeutral (VSnd v)     = isNeutral v
 isNeutral _            = False
 
 instance Nominal Val where
   support VU = []
-  support (Ter t e) = support (t,e (VVar "fresh"))
+  support (Ter t e) = support (t,e (VVar "fresh" t))
   support (VCPair i a b t) = support (i,[a,b,t])
   support (VParam x v) = delete x $ support v
   support (VPi v1 v2) = support [v1,v2]
   support (VCon _ vs) = support vs
   support (VApp u v) = support (u, v)
   support (VSplit u v) = support (u, v)
-  support (VVar _) = []
+  support (VVar _ t) = support t
   support (VSigma u v) = support (u,v)
   support (VSPair u v) = support (u,v)
   support (VFst u) = support u
@@ -184,7 +188,7 @@ instance Nominal Val where
       VFst u -> VFst (sw u)
       VSnd u -> VSnd (sw u)
       VCon c vs -> VCon c (sw vs)
-      VVar x -> VVar x
+      VVar x t -> VVar x (sw t)
       VApp u v -> VApp (sw u) (sw v)
       VSplit u v -> VSplit (sw u) (sw v)
 
@@ -263,12 +267,12 @@ instance Show Val where
 showVal :: Val -> String
 showVal VU           = "U"
 showVal (Ter t e)  = '\\' : showVal x <+> ":" <+> showVal t <+> "->" <+> showVal (e x)
-  where x = VVar "fresh"
+  where x = VVar "fresh" t
 showVal (VCon c us)  = c <+> showVals us
 showVal (VPi a f)    = "Pi" <+> showVals [a,f]
 showVal (VApp u v)   = showVal u <+> showVal1 v
 showVal (VSplit u v) = showVal u <+> showVal1 v
-showVal (VVar x)     = x
+showVal (VVar x _)     = x
 showVal (VSPair u v) = "pair" <+> showVals [u,v]
 showVal (VSigma u v) = "Sigma" <+> showVals [u,v]
 showVal (VFst u)     = showVal u ++ ".1"

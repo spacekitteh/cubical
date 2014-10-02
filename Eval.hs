@@ -49,7 +49,7 @@ face i t = case t of
                   | otherwise -> VCPair j (face i a) (face i b) (face i ty)
   VParam j v -> VParam k (face i (v `swap` (j,k)))
     where k = fresh (v,i,j)
-  VVar x -> VVar x
+  VVar x ty -> VVar x (face i ty)
 
 vpi a b = VPi a $ Ter a b
 vcSig i a b = VCPair i a (Ter a b) VU
@@ -75,7 +75,7 @@ param i t = case t of
   VSPair a b -> VSPair (param i a) (param i b)
   VFst a -> VFst (param i a)
   VSnd a -> VSnd (param i a)
-  VVar _ -> stop
+  VVar _ _ -> stop
   VParam _ _ -> stop
   VApp _ _ -> stop
   VCPair _ _ _ VU -> typ
@@ -85,8 +85,24 @@ param i t = case t of
  where stop = VParam i t
        typ = Ter (face i t) $ \x -> paramT i t x
 
+neuTyp :: Val -> Val
+neuTyp v0 = case v0 of
+   VVar _ ty -> ty
+   VCPair _ _ _ t -> t
+   VParam i t -> paramT i (neuTyp t) (face i t)
+   VApp n u -> case neuTyp n of
+     VPi _ b -> b `app` u
+     _ -> error "neuTyp: panic"
+   VFst n -> case neuTyp n of
+     VSigma a _ -> a
+     _ -> error "neuTyp: VFst: panic"
+   VSnd n -> case neuTyp n of
+     VSigma _ b -> b `app` fstSVal n
+     _ -> error "neuTyp: VSnd: panic"
+  
 app :: Val -> Val -> Val
-app (VApp (VParam i f) a) ai = VParam i (f `app` (VCPair i a ai (error "TYPE HEERE!")))
+app (VApp (VParam i f) a) ai = VParam i (f `app` (VCPair i a ai arg))
+  where VPi arg _ = neuTyp f
 app (VCPair i f g (VPi _a b)) u = VCPair i (app f (face i u)) ((g `app` (face i u)) `app` param i u) (b `app` u)
 app (Ter _ f) u = f u
 -- app (Ter (Split _ nvs) e) (VCon name us) = case lookup name nvs of
@@ -110,14 +126,14 @@ sndSVal u | isNeutral u = VSnd u
 -- conversion test
 conv :: Int -> Val -> Val -> Bool
 conv k VU VU                                  = True
-conv k (Ter _ f) (Ter _ f') = do
-  let v = mkVar k
+conv k (Ter ty f) (Ter _ f') = do
+  let v = mkVar k ty
   conv (k+1) (f v) (f' v)
-conv k (Ter _ f) u' = do
-  let v = mkVar k
+conv k (Ter ty f) u' = do
+  let v = mkVar k ty
   conv (k+1) (f v) (app u' v)
-conv k u' (Ter _ f) = do
-  let v = mkVar k
+conv k u' (Ter ty f) = do
+  let v = mkVar k ty
   conv (k+1) (app u' v) (f v)
 -- conv k (Ter (Split p _) e) (Ter (Split p' _) e') =
 --   (p == p') && convEnv k e e'
@@ -126,10 +142,10 @@ conv k u' (Ter _ f) = do
 -- conv k (Ter (Undef p) e) (Ter (Undef p') e') =
 --   (p == p') && convEnv k e e'
 conv k (VPi u v) (VPi u' v') = do
-  let w = mkVar k
+  let w = mkVar k u
   conv k u u' && conv (k+1) (app v w) (app v' w)
 conv k (VSigma u v) (VSigma u' v') = do
-  let w = mkVar k
+  let w = mkVar k u
   conv k u u' && conv (k+1) (app v w) (app v' w)
 conv k (VFst u) (VFst u') = conv k u u'
 conv k (VSnd u) (VSnd u') = conv k u u'
@@ -142,7 +158,7 @@ conv k w            (VSPair u v)   =
   conv k (fstSVal w) u && conv k (sndSVal w) v
 conv k (VApp u v)   (VApp u' v')   = conv k u u' && conv k v v'
 conv k (VSplit u v) (VSplit u' v') = conv k u u' && conv k v v'
-conv k (VVar x)     (VVar x')      = x == x'
+conv k (VVar x _) (VVar x' _)      = x == x'
 conv k _              _            = False
 
 convEnv :: Int -> Env -> Env -> Bool
