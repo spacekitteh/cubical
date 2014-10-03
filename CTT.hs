@@ -22,19 +22,12 @@ noLoc x = (x, Loc "" (0,0))
 
 -- Branch of the form: c x1 .. xn -> e
 type Brc     = (Label,([Binder],Ter))
-type VBrc    = (Label,([Binder],Val))
 
 -- Telescope (x1 : A1) .. (xn : An)
 type Tele   = [(Binder,Ter)]
-data VTele  = VNil | VCons Val (Val -> VTele)
-
-mkTele k VNil = []
-mkTele k (VCons ty tele) = v : mkTele (k+1) (tele v)
-  where v = mkVar k ty
 
 -- Labelled sum: c (x1 : A1) .. (xn : An)
 type LblSum  = [(Binder,Tele)]
-type VLblSum = [(Binder,VTele)]
 
 -- Context gives type values to identifiers
 type Ctxt   = [(Binder,Val)]
@@ -146,7 +139,6 @@ data Val = VU
          | VCPair Color Val Val Val
          | VParam Color Val -- (Color -> Val)
          -- labelled sum c1 A1s,..., cn Ans (assumes terms are constructors)
-         | VSum Binder VLblSum
   -- deriving Eq
 
 mkVar :: Int -> Val -> Val

@@ -12,7 +12,10 @@ Module.   Module ::= "module" AIdent "where" "{" [Imp] [Decl] "}" ;
 Import.   Imp ::= "import" AIdent ;
 separator Imp ";" ;
 
-DeclDef.    Decl ::= AIdent [AIdent] "=" ExpWhere ;
+Bind.       Binder ::= "(" AIdent ":" Exp ")"
+terminator  Binder "";
+
+DeclDef.    Decl ::= AIdent [Binder] "=" ExpWhere ;
 DeclType.   Decl ::= AIdent ":" Exp ;
 DeclData.   Decl ::= "data" AIdent [AIdent] "=" [Label] ;
 DeclMutual. Decl ::= "mutual" "{" [Decl] "}" ;
@@ -22,7 +25,7 @@ Where.    ExpWhere ::= Exp "where" "{" [Decl] "}" ;
 NoWhere.  ExpWhere ::= Exp ;
 
 Let.      Exp  ::= "let" "{" [Decl] "}" "in" Exp ;
-Lam.      Exp  ::= "\\" AIdent "->" Exp ;
+Lam.      Exp  ::= "\\" AIdent ":" Exp "->" Exp ;
 Split.    Exp  ::= "split" "{" [Branch] "}" ;
 Fun.      Exp1 ::= Exp2 "->" Exp1 ;
 Pi.       Exp1 ::= [PseudoTDecl] "->" Exp1 ;
@@ -33,7 +36,7 @@ Snd.      Exp3 ::= Exp3 ".2" ;
 Pair.     Exp3 ::= "(" Exp "," Exp ")" ;
 Var.      Exp3 ::= AIdent ;
 U.        Exp3 ::= "U" ;
-Param.    Exp3  ::= Exp3 "." AIdent ;
+Param.    Exp3  ::= Exp "." AIdent ;
 coercions Exp 3 ;
 
 -- Branches
