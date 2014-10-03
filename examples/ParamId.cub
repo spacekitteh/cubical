@@ -1,0 +1,5 @@
+
+module ParamId where
+
+paramId : (f : (a : U) -> a -> a) -> (A : U) -> (P : A -> U) -> (x : A) -> P x -> P (f A x)
+paramId (f : (a : U) -> a -> a) = f.i
