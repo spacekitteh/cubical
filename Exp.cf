@@ -12,12 +12,12 @@ Module.   Module ::= "module" AIdent "where" "{" [Imp] [Decl] "}" ;
 Import.   Imp ::= "import" AIdent ;
 separator Imp ";" ;
 
-Bind.       Binder ::= "(" AIdent ":" Exp ")"
+Bind.       Binder ::= "(" AIdent ":" Exp ")";
 terminator  Binder "";
 
 DeclDef.    Decl ::= AIdent [Binder] "=" ExpWhere ;
 DeclType.   Decl ::= AIdent ":" Exp ;
-DeclData.   Decl ::= "data" AIdent [AIdent] "=" [Label] ;
+DeclData.   Decl ::= "data" AIdent [Binder] "=" [Label] ;
 DeclMutual. Decl ::= "mutual" "{" [Decl] "}" ;
 separator   Decl ";" ;
 
