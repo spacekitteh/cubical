@@ -132,7 +132,7 @@ mkWheres (d:ds) e = Where (mkWheres ds e) d
 -- | Values
 
 data Val = VU
-         | Ter Val {- type -} (Val -> Val) -- Better name: Closure
+         | VLam Val {- type -} (Val -> Val) -- Better name: Closure
          | VPi Val Val
          | VSigma Val Val
          | VSPair Val Val
@@ -161,7 +161,7 @@ isNeutral _            = False
 
 instance Nominal Val where
   support VU = []
-  support (Ter t e) = support (t,e (VVar "fresh" t))
+  support (VLam t e) = support (t,e (VVar "fresh" t))
   support (VCPair i a b t) = support (i,[a,b,t])
   support (VParam x v) = delete x $ support v
   support (VPi v1 v2) = support [v1,v2]
@@ -179,7 +179,7 @@ instance Nominal Val where
     let sw u = swap u ij
     in case u of
       VU -> VU
-      Ter t e -> Ter t (\x -> sw (e x))
+      VLam t e -> VLam t (\x -> sw (e x))
       VPi a f -> VPi (sw a) (sw f)
       VParam k v -> VParam (sw k) (sw v)
       VCPair i a b t -> VCPair (sw i) (sw a) (sw b) (sw t)
@@ -266,7 +266,7 @@ instance Show Val where
 
 showVal :: Val -> String
 showVal VU           = "U"
-showVal (Ter t e)  = '\\' : showVal x <+> ":" <+> showVal t <+> "->" <+> showVal (e x)
+showVal (VLam t e)  = '\\' : showVal x <+> ":" <+> showVal t <+> "->" <+> showVal (e x)
   where x = VVar "fresh" t
 showVal (VCon c us)  = c <+> showVals us
 showVal (VPi a f)    = "Pi" <+> showVals [a,f]

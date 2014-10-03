@@ -19,7 +19,7 @@ eval e (Param i t)     = param i (eval e t)
 eval e (App r s)       = app (eval e r) (eval e s)
 eval e (Var i)         = snd (look i e)
 eval e (Pi a b)        = VPi (eval e a) (eval e b)
-eval e (Lam x t u)     = Ter (eval e t) (\xv -> eval (Pair e (x,xv)) u) -- stop at lambdas
+eval e (Lam x t u)     = VLam (eval e t) (\xv -> eval (Pair e (x,xv)) u) -- stop at lambdas
 eval e (Sigma a b)     = VSigma (eval e a) (eval e b)
 eval e (SPair a b)     = VSPair (eval e a) (eval e b)
 eval e (Fst a)         = fstSVal (eval e a)
@@ -36,7 +36,7 @@ evals env bts = [ (b,eval env t) | (b,t) <- bts ]
 face :: Color -> Val -> Val
 face i t = case t of
   VU -> VU
-  Ter ty f -> Ter (face i ty) $ \x -> face i (f x)
+  VLam ty f -> VLam (face i ty) $ \x -> face i (f x)
   VPi a b -> VPi (face i a) (face i b)
   VSigma a b -> VSigma (face i a) (face i b)
   VSPair a b -> VSPair (face i a) (face i b)
@@ -51,9 +51,9 @@ face i t = case t of
     where k = fresh (v,i,j)
   VVar x ty -> VVar x (face i ty)
 
-vpi a b = VPi a $ Ter a b
-vcSig i a b = VCPair i a (Ter a b) VU
-vSig a b = VSigma a (Ter a b)
+vpi a b = VPi a $ VLam a b
+vcSig i a b = VCPair i a (VLam a b) VU
+vSig a b = VSigma a (VLam a b)
 
 paramT :: Color -> Val -> Val -> Val
 paramT i VU t = vpi t (\_ -> VU)
@@ -69,7 +69,7 @@ paramT i t x = param i t `app` x
 
 param :: Color -> Val -> Val
 param i t = case t of
-  Ter a f -> Ter (face i a) $ \x -> Ter (paramT i a x) $ \xi -> param i (f $ VCPair i x xi a)
+  VLam a f -> VLam (face i a) $ \x -> VLam (paramT i a x) $ \xi -> param i (f $ VCPair i x xi a)
   VCPair j _ b _ | j == i -> b
   VCPair j a b (ty@(VCPair k _ _ VU)) | j == k -> VCPair j (param i a) (param i b) (paramT i ty (face i t))
   VSPair a b -> VSPair (param i a) (param i b)
@@ -83,7 +83,7 @@ param i t = case t of
   VSigma _ _ -> typ
   VU -> typ
  where stop = VParam i t
-       typ = Ter (face i t) $ \x -> paramT i t x
+       typ = VLam (face i t) $ \x -> paramT i t x
 
 neuTyp :: Val -> Val
 neuTyp v0 = case v0 of
@@ -104,7 +104,7 @@ app :: Val -> Val -> Val
 app (VApp (VParam i f) a) ai = VParam i (f `app` (VCPair i a ai arg))
   where VPi arg _ = neuTyp f
 app (VCPair i f g (VPi _a b)) u = VCPair i (app f (face i u)) ((g `app` (face i u)) `app` param i u) (b `app` u)
-app (Ter _ f) u = f u
+app (VLam _ f) u = f u
 -- app (Ter (Split _ nvs) e) (VCon name us) = case lookup name nvs of
 --     Just (xs,t) -> eval (upds e (zip xs us)) t
 --     Nothing -> error $ "app: Split with insufficient arguments; " ++
@@ -126,13 +126,13 @@ sndSVal u | isNeutral u = VSnd u
 -- conversion test
 conv :: Int -> Val -> Val -> Bool
 conv k VU VU                                  = True
-conv k (Ter ty f) (Ter _ f') = do
+conv k (VLam ty f) (VLam _ f') = do
   let v = mkVar k ty
   conv (k+1) (f v) (f' v)
-conv k (Ter ty f) u' = do
+conv k (VLam ty f) u' = do
   let v = mkVar k ty
   conv (k+1) (f v) (app u' v)
-conv k u' (Ter ty f) = do
+conv k u' (VLam ty f) = do
   let v = mkVar k ty
   conv (k+1) (app u' v) (f v)
 -- conv k (Ter (Split p _) e) (Ter (Split p' _) e') =
