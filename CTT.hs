@@ -133,6 +133,7 @@ mkWheres (d:ds) e = Where (mkWheres ds e) d
 
 data Val = VU
          | VLam Val {- type -} (Val -> Val) -- Better name: Closure
+         | Ter Ter Env
          | VPi Val Val
          | VSigma Val Val
          | VSPair Val Val
@@ -159,9 +160,21 @@ isNeutral (VFst v)     = isNeutral v
 isNeutral (VSnd v)     = isNeutral v
 isNeutral _            = False
 
+mapEnv :: (Val -> Val) -> Env -> Env
+mapEnv _ Empty = Empty
+mapEnv f (Pair e (x,v)) = Pair (mapEnv f e) (x,f v)
+mapEnv f (PDef ts e) = PDef ts (mapEnv f e)
+
+instance Nominal Env where
+  swap e xy = mapEnv (\u -> swap u xy) e
+  support Empty = []
+  support (Pair e (_,v)) = support (e, v)
+  support (PDef _ e) = support e
+
 instance Nominal Val where
   support VU = []
   support (VLam t e) = support (t,e (VVar "fresh" t))
+  support (Ter _ e) = support e
   support (VCPair i a b t) = support (i,[a,b,t])
   support (VParam x v) = delete x $ support v
   support (VPi v1 v2) = support [v1,v2]
@@ -266,6 +279,7 @@ instance Show Val where
 
 showVal :: Val -> String
 showVal VU           = "U"
+showVal (Ter t env) = show t <+> show env
 showVal (VLam t e)  = '\\' : showVal x <+> ":" <+> showVal t <+> "->" <+> showVal (e x)
   where x = VVar "fresh" t
 showVal (VCon c us)  = c <+> showVals us

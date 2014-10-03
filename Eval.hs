@@ -26,16 +26,36 @@ eval e (Fst a)         = fstSVal (eval e a)
 eval e (Snd a)         = sndSVal (eval e a)
 eval e (Where t decls) = eval (PDef [ (x,y) | (x,_,y) <- decls ] e) t
 eval e (Con name ts)   = VCon name (map (eval e) ts)
--- eval e (Split pr alts) = Ter (Split pr alts) e
--- eval e (Sum pr ntss)   = Ter (Sum pr ntss) e
+eval e (Split pr alts) = Ter (Split pr alts) e
+eval e (Sum pr ntss)   = Ter (Sum pr ntss) e
 eval _ (Undef _)       = error "undefined"
-
 evals :: Env -> [(Binder,Ter)] -> [(Binder,Val)]
 evals env bts = [ (b,eval env t) | (b,t) <- bts ]
 
+second f (a,b) = (a,f b)
+faceTer :: Color -> Ter -> Ter
+faceTer i t0 = let fc = faceTer i in case t0 of
+  App t u -> App (fc t) (fc u)
+  Pi t u -> Pi (fc t) (fc u)
+  Lam b t u -> Lam b (fc t) (fc u)
+  Sigma t u -> Sigma (fc t) (fc u)
+  SPair t u -> SPair (fc t) (fc u)
+  Fst t -> Fst (fc t)
+  Snd t -> Snd (fc t)
+  Where t ds -> Where (fc t) [ (b, fc u, fc v) | (b,u,v) <- ds]
+  Var x -> Var x
+  U -> U
+  Param j t | i == j -> Param j t
+            | i /= j -> Param j (fc t)
+  Con l ts -> Con l (map fc ts)
+  Split loc brcs -> Split loc (map (second (second fc)) brcs)
+  Sum b lblsum -> Sum b (map (second (map (second fc))) lblsum)
+  Undef loc -> Undef loc
+  
 face :: Color -> Val -> Val
 face i t = case t of
   VU -> VU
+  Ter ter e -> Ter (faceTer i ter) e
   VLam ty f -> VLam (face i ty) $ \x -> face i (f x)
   VPi a b -> VPi (face i a) (face i b)
   VSigma a b -> VSigma (face i a) (face i b)
@@ -135,12 +155,12 @@ conv k (VLam ty f) u' = do
 conv k u' (VLam ty f) = do
   let v = mkVar k ty
   conv (k+1) (app u' v) (f v)
--- conv k (Ter (Split p _) e) (Ter (Split p' _) e') =
---   (p == p') && convEnv k e e'
--- conv k (Ter (Sum p _) e)   (Ter (Sum p' _) e') =
---   (p == p') && convEnv k e e'
--- conv k (Ter (Undef p) e) (Ter (Undef p') e') =
---   (p == p') && convEnv k e e'
+conv k (Ter (Split p _) e) (Ter (Split p' _) e') =
+  (p == p') && convEnv k e e'
+conv k (Ter (Sum p _) e)   (Ter (Sum p' _) e') =
+  (p == p') && convEnv k e e'
+conv k (Ter (Undef p) e) (Ter (Undef p') e') =
+  (p == p') && convEnv k e e'
 conv k (VPi u v) (VPi u' v') = do
   let w = mkVar k u
   conv k u u' && conv (k+1) (app v w) (app v' w)
