@@ -99,7 +99,7 @@ instance Nominal a => Nominal (Maybe a) where
 -- Terms
 data Ter = App Ter Ter
          | Pi Ter Ter
-         | Lam Binder Ter Ter
+         | Lam Binder Ter Ter -- TODO: The type is not needed here
          | Sigma Ter Ter
          | SPair Ter Ter
          | Fst Ter

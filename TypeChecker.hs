@@ -127,10 +127,10 @@ check a t = case (a,t) of
   (_,Con c es) -> do
     bs <- getLblType c a
     checksV bs es
-  (VU,Pi a (Lam x _ b)) -> do -- TODO: Fix
+  (VU,Pi a (Lam x (Undef _) b)) -> do
     check VU a
     localM (addType (x,a)) $ check VU b
-  (VU,Sigma a (Lam x _ b)) -> do -- TODO: Fix
+  (VU,Sigma a (Lam x (Undef _) b)) -> do
     check VU a
     localM (addType (x,a)) $ check VU b
   (VU,Sum _ bs) -> sequence_ [checkTele as | (_,as) <- bs]
