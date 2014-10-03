@@ -2,4 +2,14 @@
 module ParamId where
 
 paramId : (f : (a : U) -> a -> a) -> (A : U) -> (P : A -> U) -> (x : A) -> P x -> P (f A x)
-paramId (f : (a : U) -> a -> a) = f.i
+paramId (f : (a : U) -> a -> a) (A : U) (P : A -> U) = f.i A P
+
+paramU : (u : U) -> u -> U
+paramU (u : U) = u.i
+
+paramPi : (A B : U) -> (f : A -> B) -> (x : A) -> (xi : A.i x) -> B.i (f x)
+paramPi (A : U) (B : U) (f : A -> B) = f.i
+
+paramPi2 : (f : (a : U) -> a) -> (A : U) -> (P : A -> U) -> P (f A)
+paramPi2 (f : (a : U) -> a) (A : U) (P : A -> U) = f.i A P
+

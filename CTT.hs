@@ -150,6 +150,7 @@ isNeutral (VSplit _ v) = isNeutral v
 isNeutral (VVar _ _)   = True
 isNeutral (VFst v)     = isNeutral v
 isNeutral (VSnd v)     = isNeutral v
+isNeutral (VParam _ v) = isNeutral v
 isNeutral _            = False
 
 mapEnv :: (Val -> Val) -> Env -> Env
@@ -165,7 +166,7 @@ instance Nominal Env where
 
 instance Nominal Val where
   support VU = []
-  support (VLam t e) = support (t,e (VVar "fresh" t))
+  support (VLam t e) = support (t,e (VVar "freshsupport" t))
   support (Ter _ e) = support e
   support (VCPair i a b t) = support (i,[a,b,t])
   support (VParam x v) = delete x $ support v
@@ -283,6 +284,8 @@ showVal (VSPair u v) = "pair" <+> showVals [u,v]
 showVal (VSigma u v) = "Sigma" <+> showVals [u,v]
 showVal (VFst u)     = showVal u ++ ".1"
 showVal (VSnd u)     = showVal u ++ ".2"
+showVal (VParam i a) = showVal a ++ "." ++ i
+
 
 showDim :: Show a => [a] -> String
 showDim = parens . ccat . map show

@@ -79,7 +79,7 @@ paramT :: Color -> Val -> Val -> Val
 paramT i VU t = vpi t (\_ -> VU)
 paramT i (VPi a g) f = vpi (face i a) $ \x -> vpi (paramT i a x) $ \xi ->
                     paramT i (g `app` (VCPair i x xi a))  (f `app` x)
-paramT i (VCPair j a b VU) xx | i == j = b
+paramT i (VCPair j a b VU) xx | i == j = b `app` xx
                               | otherwise = vcSig j (paramT i a (face i xx)) $ \xj -> param i b `app` (face i xx) `app` xj `app` (param i xx)
 paramT i (VSigma a b) xx = vSig (paramT i a (face i xx)) $ \xj -> param i b `app` (face i xx) `app` xj `app` (param i xx)
 paramT i t x = param i t `app` x
@@ -179,6 +179,7 @@ conv k w            (VSPair u v)   =
 conv k (VApp u v)   (VApp u' v')   = conv k u u' && conv k v v'
 conv k (VSplit u v) (VSplit u' v') = conv k u u' && conv k v v'
 conv k (VVar x _) (VVar x' _)      = x == x'
+conv k (VParam i u) (VParam j v)   = conv k u (swap v (i,j))
 conv k _              _            = False
 
 convEnv :: Int -> Env -> Env -> Bool
