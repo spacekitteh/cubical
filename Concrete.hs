@@ -134,18 +134,18 @@ resolveVar (AIdent (l,x))
     case C.getIdent x vars of
       Just Variable        -> return $ C.Var x
       -- Just (Constructor a) -> expandConstr a x []
-      Just (Constructor a) -> C.Con x []
+      Just (Constructor a) -> return $ C.Con x []
       _ -> throwError $
         "Cannot resolve variable" <+> x <+> "at position" <+>
         show l <+> "in module" <+> modName
 
-lam :: AIdent -> Resolver Ter -> Resolver Ter -> Resolver Ter
-lam a t e = do 
+lam :: AIdent -> Resolver Ter -> Resolver Ter
+lam a e = do 
   x <- resolveBinder a
-  C.Lam x <$> local (insertVar x) t <*> local (insertVar x) e
+  C.Lam x (C.Undef $ C.Loc "loc:lambda" (0,0)) <$>  local (insertVar x) e
 
--- lams :: [AIdent] -> Resolver Ter -> Resolver Ter
--- lams = flip $ foldr lam
+lams :: [AIdent] -> Resolver Ter -> Resolver Ter
+lams = flip $ foldr lam
 
 bind :: (Ter -> Ter -> Ter) -> (AIdent, Exp) -> Resolver Ter -> Resolver Ter
 bind f (x,t) e = f <$> resolveExp t <*> lam x e
@@ -173,7 +173,7 @@ resolveExp (Pi t b)     =  case pseudoTele t of
   Just tele -> binds C.Pi tele (resolveExp b)
   Nothing   -> throwError "Telescope malformed in Pigma"
 resolveExp (Fun a b)    = bind C.Pi (AIdent ((0,0),"_"), a) (resolveExp b)
-resolveExp (Lam x t e)  = lam x (resolveExp t) (resolveExp e)
+resolveExp (Lam x e)    = lam x (resolveExp e)
 resolveExp (Fst t)      = C.Fst <$> resolveExp t
 resolveExp (Snd t)      = C.Snd <$> resolveExp t
 resolveExp (Pair t0 t1) = C.SPair <$> resolveExp t0 <*> resolveExp t1
