@@ -209,11 +209,11 @@ checkInfer e = case e of
   Where t d -> do
     checkDecls d
     localM (addDecls d) $ checkInfer t
-  Param i t -> do
+  Param n i t -> do
     ty <- checkInfer t
     e <- env <$> ask
     let f = face i $ eval e t
-    return $ paramT 1 i ty f
+    return $ paramT n i ty f
   _ -> throwError ("checkInfer " ++ show e)
 
 checks :: (Tele,Env) -> [Ter] -> Typing ()

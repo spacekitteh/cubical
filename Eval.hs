@@ -1,7 +1,10 @@
+{-# LANGUAGE PatternGuards #-}
+
 module Eval where
 
 import Data.List
 import Data.Maybe (fromMaybe)
+import Control.Applicative
 
 import CTT
 
@@ -15,7 +18,7 @@ look x r@(PDef es r1) = case lookupIdent x es of
 
 eval :: Env -> Ter -> Val
 eval _ U               = VU
-eval e (Param i t)     = param 1 i (eval e t)
+eval e (Param n i t)   = param n i (eval e t)
 eval e (App r s)       = app (eval e r) (eval e s)
 eval e (Var i)         = snd (look i e)
 eval e (Pi a b)        = VPi (eval e a) (eval e b)
@@ -45,8 +48,8 @@ faceTer i t0 = let fc = faceTer i in case t0 of
   Where t ds -> Where (fc t) [ (b, fc u, fc v) | (b,u,v) <- ds]
   Var x -> Var x
   U -> U
-  Param j t | i == j -> Param j t
-            | i /= j -> Param j (fc t)
+  Param n j t | i == j -> Param n j t
+              | i /= j -> Param n j (fc t)
   Con l ts -> Con l (map fc ts)
   Split loc brcs -> Split loc (map (second (second fc)) brcs)
   Sum b lblsum -> Sum b (map (second (map (second fc))) lblsum)
@@ -74,14 +77,82 @@ face i t = case t of
 vpi a b = VPi a $ VLam a b
 vcSig i a b = VCPair i a (VLam a b) VU
 vSig a b = VSigma a (VLam a b)
-vPred a = vpi a (\_ -> VU) 
+vFun a b = vpi a (\_ -> b) 
 
+isRelTyp :: VTele -> Bool
+isRelTyp (Nil VU) = True
+isRelTyp (Nil _) = False
+isRelTyp (Cons a f) = isRelTyp (f $ VVar "isRelTyp" a)
+
+getPiTele :: Val -> VTele
+getPiTele (VPi a f) = Cons a $ \x -> getPiTele (f `app` x)
+getPiTele x = Nil x
+
+getPiTeleN :: Int -> Val -> VTele
+getPiTeleN 0 x = Nil x
+getPiTeleN n (VPi a f) = Cons a $ \x -> getPiTeleN (n-1) (f `app` x)
+getPiTeleN _ x = Nil x
+
+getLamTeleN :: Int -> Val -> VTele
+getLamTeleN 0 x = Nil x
+getLamTeleN n (VLam a f) = Cons a $ \x -> getLamTeleN (n-1) (f x)
+getLamTeleN _ x = Nil x
+
+lenT n getter x | l == n = Just tele
+                | otherwise = Nothing
+  where tele = getter n x
+        l = teleLen tele
+  
+teleLen :: VTele -> Int
+teleLen (Nil _) = 0
+teleLen (Cons a f) = 1 + teleLen (f $ VVar "teleLen" a)
+
+data VTele = Nil Val | Cons Val (Val -> VTele)
+
+instance Show VTele where
+  show (Nil x) = show x
+  show (Cons x xs) = "x:" ++ show x ++ ", " ++ show (xs $ VVar "x" x)
+type Rel = [Val] -> Val
+
+exPred = vFun (VVar "a" VU) VU
+
+type BindOp = Val -> (Val -> Val) -> Val
+
+
+faceTele :: BindOp -> Color -> VTele -> [Val] -> ([Val] -> Val) -> Val
+faceTele _ _ (Nil _) xs k = k xs
+faceTele bind i (Cons a gamma) xs k = bind (face i a) $ \x -> faceTele bind i (gamma x) (x:xs) k
+
+paramTele :: BindOp -> Color -> VTele -> [Val] -> (Val -> Val) -> Val
+paramTele _ _ (Nil b) [] g = g b
+paramTele bind i (Cons a gamma) (x:xs) g = bind (paramT 1 i a x) $ \xi -> paramTele bind i (gamma (VCPair i x xi a)) xs g
+-- FIXME: the number 1 in the above is wrong.
+
+mkRelTyp :: Color -> VTele -> Val -> Val
+mkRelTyp i tele rel = faceTele vpi i tele [] $ \xs ->
+                      vFun (rel `apps` xs) $
+                      paramTele vpi i tele xs $
+                      \_ -> VU
+
+mkFunTyp :: Int -> Color -> VTele -> Val -> Val
+mkFunTyp n i tele f =
+  faceTele vpi i tele [] $ \xs ->
+  paramTele vpi i tele xs $ \b ->
+  paramT n i b (f `apps` xs)
+
+getArgs 0 x = Just (x, [])
+getArgs n (VApp f a) = second (++[a]) <$> getArgs (n-1) f
+
+apps :: Val -> [Val] -> Val
+apps = foldl app
 
 paramT :: Int -> Color -> Val -> Val -> Val
 paramT n i t0 xx = case t0 of
-  VU -> vPred xx
-  (VPi a g) -> vpi (face i a) $ \x -> vpi (extT a x) $ \xi -> extT (g `app` (VCPair i x xi a))  (xx `app` x)
-  (VCPair j a b VU) | i == j -> b `app` xx
+  VU -> vFun (face i xx) VU
+  _ | Just tele <- lenT (2^(n-1)-1) getPiTeleN t0, isRelTyp tele -> mkRelTyp i tele xx
+  _ | Just tele <- lenT (2^(n-1))   getPiTeleN t0 -> mkFunTyp n i tele xx
+  -- TODO: getArgs
+  -- _ | Just (f,args) <- getArgs (2^(n-1)-1) t0 ->
   (VSigma a b) -> vSig (extT a (face i xx)) $ \xj -> ext b `app` (face i xx) `app` xj `app` (ext xx)
   _ -> ext t0 `app` xx
  where ext = param n i
@@ -91,22 +162,27 @@ paramT n i t0 xx = case t0 of
 -- substCol = error "color substitution not implemented"
 
 param :: Int -> Color -> Val -> Val
-param n i t = case t of
-  VLam a f -> VLam (face i a) $ \x -> VLam (extT a x) $ \xi -> ext (f $ VCPair i x xi a)
-  VCPair j _ b _ | j == i -> b
-  VCPair j a b (ty@(VCPair k _ _ VU)) | j == k -> VCPair j (ext a) (param (n+1) i b) (extT ty (face i t))
+param n i t0 = case t0 of
+  _ | Just tele <- lenT (2^(n-1)) getLamTeleN t0 ->
+    faceTele VLam i tele [] $ \xs ->
+    paramTele VLam i tele xs $ \b ->
+    param n i b
+  -- VLam a f -> VLam (face i a) $ \x -> VLam (extT a x) $ \xi -> ext (f $ VCPair i x xi a)
+  VCPair j a b ty | j == i -> b
+                  | otherwise -> VCPair j (ext a) (param (n+1) i b) (extT ty (face i t0))
   VSPair a b -> VSPair (ext a) (ext b)
   VFst a -> VFst (ext a)
   VSnd a -> VSnd (ext a)
   VVar _ _ -> stop
   VParam _ _ _ -> stop -- FIXME: normalise
-  VApp _ _ -> stop
-  VCPair _ _ _ VU -> typ
+  _ | Just (f,args) <- getArgs (2^(n-1)) t0 ->
+    f `apps` map (face i) args `apps` map (param n i) args
+  -- VApp _ _ -> stop
   VPi _ _ -> typ
   VSigma _ _ -> typ
   VU -> typ
- where stop = VParam n i t
-       typ = VLam (face i t) $ \x -> extT t x
+ where stop = VParam n i t0
+       typ = VLam (face i t0) $ \x -> extT t0 x
        ext = param n i
        extT = paramT n i
 

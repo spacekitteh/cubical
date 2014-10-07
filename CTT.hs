@@ -99,7 +99,7 @@ data Ter = App Ter Ter
          | Where Ter Decls
          | Var Ident
          | U
-         | Param Color Ter
+         | Param Int Color Ter
          -- constructor c Ms
          | Con Label [Ter]
          -- branches c1 xs1  -> M1,..., cn xsn -> Mn

@@ -186,7 +186,8 @@ resolveExp (Split brs)  = do
 resolveExp (Let decls e) = do
   (rdecls,names) <- resolveDecls decls
   C.mkWheres rdecls <$> local (insertBinders names) (resolveExp e)
-resolveExp (Param e (AIdent (_l,i))) = C.Param i <$> resolveExp e
+resolveExp (Param e (AIdent (_l,i))) = C.Param 1 i <$> resolveExp e
+resolveExp (ParamN e (AIdent (_l,i)) n) = C.Param (fromIntegral n) i <$> resolveExp e
 
 resolveWhere :: ExpWhere -> Resolver Ter
 resolveWhere = resolveExp . unWhere
