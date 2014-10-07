@@ -3,7 +3,6 @@ module CTT where
 
 import Control.Applicative
 import Data.List
-import Data.Maybe
 import Pretty
 
 --------------------------------------------------------------------------------
@@ -49,7 +48,7 @@ declDefs decl = [ (x,d) | (x,_,d) <- decl]
 
 
 gensym :: [Color] -> Color
-gensym xs = head $ (map show [0..]) \\ xs
+gensym xs = head $ (map show [(0::Integer)..]) \\ xs
 
 gensyms :: [Color] -> [Color]
 gensyms d = let x = gensym d in x : gensyms (x : d)
@@ -137,7 +136,7 @@ data Val = VU
          | VFst Val
          | VSnd Val
          | VCPair Color Val Val Val
-         | VParam Color Val -- (Color -> Val)
+         | VParam Int Color Val -- (Color -> Val)
          -- labelled sum c1 A1s,..., cn Ans (assumes terms are constructors)
   -- deriving Eq
 
@@ -150,7 +149,7 @@ isNeutral (VSplit _ v) = isNeutral v
 isNeutral (VVar _ _)   = True
 isNeutral (VFst v)     = isNeutral v
 isNeutral (VSnd v)     = isNeutral v
-isNeutral (VParam _ v) = isNeutral v
+isNeutral (VParam _ _ v) = isNeutral v
 isNeutral _            = False
 
 mapEnv :: (Val -> Val) -> Env -> Env
@@ -169,7 +168,7 @@ instance Nominal Val where
   support (VLam t e) = support (t,e (VVar "freshsupport" t))
   support (Ter _ e) = support e
   support (VCPair i a b t) = support (i,[a,b,t])
-  support (VParam x v) = delete x $ support v
+  support (VParam _ x v) = delete x $ support v
   support (VPi v1 v2) = support [v1,v2]
   support (VCon _ vs) = support vs
   support (VApp u v) = support (u, v)
@@ -187,7 +186,7 @@ instance Nominal Val where
       VU -> VU
       VLam t e -> VLam t (\x -> sw (e x))
       VPi a f -> VPi (sw a) (sw f)
-      VParam k v -> VParam (sw k) (sw v)
+      VParam n k v -> VParam n (sw k) (sw v)
       VCPair i a b t -> VCPair (sw i) (sw a) (sw b) (sw t)
       VSigma a f -> VSigma (sw a) (sw f)
       VSPair u v -> VSPair (sw u) (sw v)
@@ -284,7 +283,7 @@ showVal (VSPair u v) = "pair" <+> showVals [u,v]
 showVal (VSigma u v) = "Sigma" <+> showVals [u,v]
 showVal (VFst u)     = showVal u ++ ".1"
 showVal (VSnd u)     = showVal u ++ ".2"
-showVal (VParam i a) = showVal a ++ "." ++ i
+showVal (VParam n i a) = showVal a ++ "(η" ++ show n ++ i ++ ")"
 
 
 showDim :: Show a => [a] -> String

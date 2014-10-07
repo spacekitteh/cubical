@@ -15,7 +15,7 @@ look x r@(PDef es r1) = case lookupIdent x es of
 
 eval :: Env -> Ter -> Val
 eval _ U               = VU
-eval e (Param i t)     = param i (eval e t)
+eval e (Param i t)     = param 1 i (eval e t)
 eval e (App r s)       = app (eval e r) (eval e s)
 eval e (Var i)         = snd (look i e)
 eval e (Pi a b)        = VPi (eval e a) (eval e b)
@@ -67,49 +67,54 @@ face i t = case t of
   VSnd a -> VSnd (face i a)
   VCPair j a b ty | j == i -> a
                   | otherwise -> VCPair j (face i a) (face i b) (face i ty)
-  VParam j v -> VParam k (face i (v `swap` (j,k)))
+  VParam n j v -> VParam n k (face i (v `swap` (j,k)))
     where k = fresh (v,i,j)
   VVar x ty -> VVar x (face i ty)
 
 vpi a b = VPi a $ VLam a b
 vcSig i a b = VCPair i a (VLam a b) VU
 vSig a b = VSigma a (VLam a b)
+vPred a = vpi a (\_ -> VU) 
 
-paramT :: Color -> Val -> Val -> Val
-paramT i VU t = vpi t (\_ -> VU)
-paramT i (VPi a g) f = vpi (face i a) $ \x -> vpi (paramT i a x) $ \xi ->
-                    paramT i (g `app` (VCPair i x xi a))  (f `app` x)
-paramT i (VCPair j a b VU) xx | i == j = b `app` xx
-                              | otherwise = vcSig j (paramT i a (face i xx)) $ \xj -> param i b `app` (face i xx) `app` xj `app` (param i xx)
-paramT i (VSigma a b) xx = vSig (paramT i a (face i xx)) $ \xj -> param i b `app` (face i xx) `app` xj `app` (param i xx)
-paramT i t x = param i t `app` x
+
+paramT :: Int -> Color -> Val -> Val -> Val
+paramT n i t0 xx = case t0 of
+  VU -> vPred xx
+  (VPi a g) -> vpi (face i a) $ \x -> vpi (extT a x) $ \xi -> extT (g `app` (VCPair i x xi a))  (xx `app` x)
+  (VCPair j a b VU) | i == j -> b `app` xx
+  (VSigma a b) -> vSig (extT a (face i xx)) $ \xj -> ext b `app` (face i xx) `app` xj `app` (ext xx)
+  _ -> ext t0 `app` xx
+ where ext = param n i
+       extT = paramT n i
 
 -- substCol :: Color -> Color -> Val -> Val
 -- substCol = error "color substitution not implemented"
 
-param :: Color -> Val -> Val
-param i t = case t of
-  VLam a f -> VLam (face i a) $ \x -> VLam (paramT i a x) $ \xi -> param i (f $ VCPair i x xi a)
+param :: Int -> Color -> Val -> Val
+param n i t = case t of
+  VLam a f -> VLam (face i a) $ \x -> VLam (extT a x) $ \xi -> ext (f $ VCPair i x xi a)
   VCPair j _ b _ | j == i -> b
-  VCPair j a b (ty@(VCPair k _ _ VU)) | j == k -> VCPair j (param i a) (param i b) (paramT i ty (face i t))
-  VSPair a b -> VSPair (param i a) (param i b)
-  VFst a -> VFst (param i a)
-  VSnd a -> VSnd (param i a)
+  VCPair j a b (ty@(VCPair k _ _ VU)) | j == k -> VCPair j (ext a) (param (n+1) i b) (extT ty (face i t))
+  VSPair a b -> VSPair (ext a) (ext b)
+  VFst a -> VFst (ext a)
+  VSnd a -> VSnd (ext a)
   VVar _ _ -> stop
-  VParam _ _ -> stop
+  VParam _ _ _ -> stop -- FIXME: normalise
   VApp _ _ -> stop
   VCPair _ _ _ VU -> typ
   VPi _ _ -> typ
   VSigma _ _ -> typ
   VU -> typ
- where stop = VParam i t
-       typ = VLam (face i t) $ \x -> paramT i t x
+ where stop = VParam n i t
+       typ = VLam (face i t) $ \x -> extT t x
+       ext = param n i
+       extT = paramT n i
 
 neuTyp :: Val -> Val
 neuTyp v0 = case v0 of
    VVar _ ty -> ty
    VCPair _ _ _ t -> t
-   VParam i t -> paramT i (neuTyp t) (face i t)
+   VParam n i t -> paramT n i (neuTyp t) (face i t)
    VApp n u -> case neuTyp n of
      VPi _ b -> b `app` u
      _ -> error "neuTyp: panic"
@@ -121,9 +126,9 @@ neuTyp v0 = case v0 of
      _ -> error "neuTyp: VSnd: panic"
   
 app :: Val -> Val -> Val
-app (VApp (VParam i f) a) ai = VParam i (f `app` (VCPair i a ai arg))
-  where VPi arg _ = neuTyp f
-app (VCPair i f g (VPi _a b)) u = VCPair i (app f (face i u)) ((g `app` (face i u)) `app` param i u) (b `app` u)
+-- app (VApp (VParam  i f) a) ai = VParam i (f `app` (VCPair i a ai arg))
+  -- where VPi arg _ = neuTyp f
+app (VCPair i f g (VPi _a b)) u = VCPair i (app f (face i u)) ((g `app` (face i u)) `app` param 1 i u) (b `app` u)
 app (VLam _ f) u = f u
 -- app (Ter (Split _ nvs) e) (VCon name us) = case lookup name nvs of
 --     Just (xs,t) -> eval (upds e (zip xs us)) t
@@ -179,7 +184,7 @@ conv k w            (VSPair u v)   =
 conv k (VApp u v)   (VApp u' v')   = conv k u u' && conv k v v'
 conv k (VSplit u v) (VSplit u' v') = conv k u u' && conv k v v'
 conv k (VVar x _) (VVar x' _)      = x == x'
-conv k (VParam i u) (VParam j v)   = conv k u (swap v (i,j))
+conv k (VParam n i u) (VParam m j v) = n == m && conv k u (swap v (i,j))
 conv k _              _            = False
 
 convEnv :: Int -> Env -> Env -> Bool

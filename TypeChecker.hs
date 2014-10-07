@@ -213,7 +213,7 @@ checkInfer e = case e of
     ty <- checkInfer t
     e <- env <$> ask
     let f = face i $ eval e t
-    return $ paramT i ty f
+    return $ paramT 1 i ty f
   _ -> throwError ("checkInfer " ++ show e)
 
 checks :: (Tele,Env) -> [Ter] -> Typing ()
