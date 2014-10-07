@@ -238,6 +238,7 @@ instance Show Ter where
 
 showTer :: Ter -> String
 showTer U               = "U"
+showTer (Param n i e)   = showTer e <+> "(η" ++ show n ++ i ++ ")"
 showTer (App e0 e1)     = showTer e0 <+> showTer1 e1
 showTer (Pi e0 e1)      = "Pi" <+> showTers [e0,e1]
 showTer (Lam (x,_) t e) = '\\' : x <+> ":" <+> showTer t <+> "->" <+> showTer e

@@ -1,0 +1,21 @@
+
+module ParamTwo where
+
+paramPred : (A : U) -> U
+paramPred (A : U) = U.i A
+
+paramRel : (A : U) -> U
+paramRel (A : U) = U.i (A -> U)
+
+paramRel2 : (A : U) -> U
+paramRel2 (A : U) = U.eta 2 i (A -> U)
+
+parametricity : (A : U) -> (a : A) -> A.i a
+parametricity (A : U) (a : A) = a.i
+
+paramSwp : (A : U) -> (a : A) -> (p : A.i a) -> A.i.j a p (a.i)
+paramSwp (A : U) (a : A) (p : A.i a) = (parametricity A).j a p
+
+paramSwp' : (A : U) -> (a : A) -> (p : A.i a) -> A.i.j a p (a.i)
+paramSwp' (A : U) (a : A) (p : A.i a) = p.eta 2 j
+

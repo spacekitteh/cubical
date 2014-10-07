@@ -175,7 +175,7 @@ resolveExp (Pi t b)     =  case pseudoTele t of
   Just tele -> binds C.Pi tele (resolveExp b)
   Nothing   -> throwError "Telescope malformed in Pigma"
 resolveExp (Fun a b)    = bind C.Pi (AIdent ((0,0),"_"), a) (resolveExp b)
-resolveExp (Lam x t e)  = lam (Bind x t) (resolveExp e)
+resolveExp (Lam x e)  = lam x (resolveExp e)
 resolveExp (Fst t)      = C.Fst <$> resolveExp t
 resolveExp (Snd t)      = C.Snd <$> resolveExp t
 resolveExp (Pair t0 t1) = C.SPair <$> resolveExp t0 <*> resolveExp t1
@@ -187,7 +187,7 @@ resolveExp (Let decls e) = do
   (rdecls,names) <- resolveDecls decls
   C.mkWheres rdecls <$> local (insertBinders names) (resolveExp e)
 resolveExp (Param e (AIdent (_l,i))) = C.Param 1 i <$> resolveExp e
-resolveExp (ParamN e (AIdent (_l,i)) n) = C.Param (fromIntegral n) i <$> resolveExp e
+resolveExp (ParamN e n (AIdent (_l,i))) = C.Param (fromIntegral n) i <$> resolveExp e
 
 resolveWhere :: ExpWhere -> Resolver Ter
 resolveWhere = resolveExp . unWhere

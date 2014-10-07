@@ -25,7 +25,7 @@ Where.    ExpWhere ::= Exp "where" "{" [Decl] "}" ;
 NoWhere.  ExpWhere ::= Exp ;
 
 Let.      Exp  ::= "let" "{" [Decl] "}" "in" Exp ;
-Lam.      Exp  ::= "\\" AIdent ":" Exp "->" Exp ;
+Lam.      Exp  ::= "\\" Binder "->" Exp ;
 Split.    Exp  ::= "split" "{" [Branch] "}" ;
 Fun.      Exp1 ::= Exp2 "->" Exp1 ;
 Pi.       Exp1 ::= [PseudoTDecl] "->" Exp1 ;
@@ -37,7 +37,7 @@ Pair.     Exp3 ::= "(" Exp "," Exp ")" ;
 Var.      Exp3 ::= AIdent ;
 U.        Exp3 ::= "U" ;
 Param.    Exp3  ::= Exp3 "." AIdent ;
-ParamN.   Exp3  ::= Exp3 ".eta" AIdent Integer ;
+ParamN.   Exp3  ::= Exp3 ".eta" Integer AIdent ;
 coercions Exp 3 ;
 
 -- Branches
