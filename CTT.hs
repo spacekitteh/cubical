@@ -285,6 +285,7 @@ showVal (VSigma u v) = "Sigma" <+> showVals [u,v]
 showVal (VFst u)     = showVal u ++ ".1"
 showVal (VSnd u)     = showVal u ++ ".2"
 showVal (VParam n i a) = showVal a ++ "(η" ++ show n ++ i ++ ")"
+showVal (VCPair i a p _ty) = "(" ++ showVal a ++ "," ++ i ++ " " ++ showVal p ++ ")"
 
 
 showDim :: Show a => [a] -> String

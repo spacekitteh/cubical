@@ -134,7 +134,6 @@ faceTele bind i (Cons a gamma) xs k = bind (face i a) $ \x -> faceTele bind i (g
 paramTele' :: [Int] -> BindOp -> Color -> VTele -> [Val] -> (Val -> Val) -> Val
 paramTele' _ _ _ (Nil b) [] g = g b
 paramTele' (l:ls) bind i (Cons a gamma) (x:xs) g = bind (paramT l i a x) $ \xi -> paramTele' ls bind i (gamma (VCPair i x xi a)) xs g
--- FIXME: the number 1 in the above is wrong.
 
 paramTele :: Int -> BindOp -> Color -> VTele -> [Val] -> (Val -> Val) -> Val
 paramTele n = paramTele' (paramLevels n)
@@ -159,9 +158,20 @@ getArgs _ _ = Nothing
 apps :: Val -> [Val] -> Val
 apps = foldl app
 
+paramTelescope :: Int -> Color -> Env -> Tele -> [Val] -> Val
+paramTelescope n i env ((b,t):tele) (a:as) =
+  vSig (paramT n i t' a) (\ai -> paramTelescope n i (Pair env (b,VCPair i a ai t')) tele as)
+  where t' = eval env t
+paramTelescope n i env [] [] = Ter (Sum ("1",Loc "paramTelescope"(1,1)) []) Empty
+
 paramT :: Int -> Color -> Val -> Val -> Val
 paramT n i t0 xx = case t0 of
   VU -> vFun xx VU
+  Ter (Sum _ lblsum) env -> case xx of
+    VCon c as ->
+      let Just (_bnd,tele) = lookupIdent c lblsum
+      in paramTelescope n i env tele as
+    _ -> stop
   -- Relation
   _ | Just tele <- lenT (2^(n-1)-1) getPiTeleN t0, isRelTyp tele -> mkRelTyp n i tele xx
   -- Pi
@@ -172,6 +182,7 @@ paramT n i t0 xx = case t0 of
   _ -> ext t0 `app` xx
  where ext = param n i
        extT = paramT n i
+       stop = VApp (VParam n i t0) xx
 
 paramLevels 1 = [1]
 paramLevels n = paramLevels (n-1) ++ map (1+) (paramLevels (n-1))
@@ -181,6 +192,9 @@ paramArgs n i xs = zipWith (\l -> param l i) (paramLevels n) xs
 
 param :: Int -> Color -> Val -> Val
 param n i t0 = case t0 of
+  -- Ter (Sum p lblsum) env -> flip Ter env $ Split (snd p) -- FIXME: encode n i in here.
+  --    [(con,) | (con,vars) <- lblsum]
+
   -- VLam a f -> VLam (face i a) $ \x -> VLam (extT a x) $ \xi -> ext (f $ VCPair i x xi a)
   -- Function
   _ | Just tele <- lenT (2^(n-1)) getLamTeleN t0 ->
@@ -210,9 +224,11 @@ param n i t0 = case t0 of
        ext = param n i
        extT = paramT n i
 
+isType :: Val -> Bool
 isType t = case t of
   VLam _ _ -> False
   VSPair _ _ -> False
+  Ter (Sum _ _) _ -> True
   VPi _ _ -> True
   VSigma _ _ -> True
   VU -> True
@@ -232,19 +248,23 @@ neuTyp v0 = case v0 of
    VSnd n -> case neuTyp n of
      VSigma _ b -> b `app` fstSVal n
      _ -> error "neuTyp: VSnd: panic"
-  
+
+
+-- FIXME: VCPair of a vcon must reduce.: (Cons x xs, (xi, xsi))  ---> Cons (x,xi) (xs,xsi)
+
 app :: Val -> Val -> Val
--- app (VApp (VParam  i f) a) ai = VParam i (f `app` (VCPair i a ai arg))
-  -- where VPi arg _ = neuTyp f
+app (VApp (VParam 1 i f@(Ter _ _)) a) ai = VParam 1 i (f `app` (VCPair i a ai arg))
+  where VPi arg _ = neuTyp f
+-- FIXME. This is useful, for example, if f is a split (or param of split...). But currently we are restricted to n=1 (also to just Ter for bad reasons)!
 app (VCPair i f g (VPi _a b)) u = VCPair i (app f (face i u)) ((g `app` (face i u)) `app` param 1 i u) (b `app` u)
 app (VLam _ f) u = f u
--- app (Ter (Split _ nvs) e) (VCon name us) = case lookup name nvs of
---     Just (xs,t) -> eval (upds e (zip xs us)) t
---     Nothing -> error $ "app: Split with insufficient arguments; " ++
---                         "missing case for " ++ name
--- app u@(Ter (Split _ _) _) v | isNeutral v = VSplit u v -- v should be neutral
---                             | otherwise   = error $ "app: VSplit " ++ show v
---                                                   ++ " is not neutral"
+app (Ter (Split _ nvs) e) (VCon name us) = case lookup name nvs of
+    Just (xs,t) -> eval (upds e (zip xs us)) t
+    Nothing -> error $ "app: Split with insufficient arguments; " ++
+                        "missing case for " ++ name
+app u@(Ter (Split _ _) _) v | isNeutral v = VSplit u v -- v should be neutral
+                            | otherwise   = error $ "app: VSplit " ++ show v
+                                                   ++ " is not neutral"
 app r s | isNeutral r = VApp r s -- r should be neutral
         | otherwise   = error $ "app: VApp " ++ show r ++ " is not neutral"
 
