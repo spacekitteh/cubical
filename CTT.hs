@@ -152,6 +152,16 @@ isNeutral (VSnd v)     = isNeutral v
 isNeutral (VParam _ _ v) = isNeutral v
 isNeutral _            = False
 
+isHungry :: Val -> Bool
+isHungry (VApp u _)   = isHungry u
+isHungry (VSplit _ v) = isHungry v
+isHungry (VVar _ _)   = False
+isHungry (Ter _ _)    = True
+isHungry (VFst v)     = isHungry v
+isHungry (VSnd v)     = isHungry v
+isHungry (VParam _ _ v) = isHungry v
+isHungry _            = False
+
 mapEnv :: (Val -> Val) -> Env -> Env
 mapEnv _ Empty = Empty
 mapEnv f (Pair e (x,v)) = Pair (mapEnv f e) (x,f v)

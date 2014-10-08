@@ -54,7 +54,7 @@ faceTer i t0 = let fc = faceTer i in case t0 of
   Split loc brcs -> Split loc (map (second (second fc)) brcs)
   Sum b lblsum -> Sum b (map (second (map (second fc))) lblsum)
   Undef loc -> Undef loc
-  
+
 face :: Color -> Val -> Val
 face i t = case t of
   VU -> VU
@@ -133,7 +133,7 @@ faceTele bind i (Cons a gamma) xs k = bind (face i a) $ \x -> faceTele bind i (g
 
 paramTele' :: [Int] -> BindOp -> Color -> VTele -> [Val] -> (Val -> Val) -> Val
 paramTele' _ _ _ (Nil b) [] g = g b
-paramTele' (l:ls) bind i (Cons a gamma) (x:xs) g = bind (paramT l i a x) $ \xi -> paramTele' ls bind i (gamma (VCPair i x xi a)) xs g
+paramTele' (l:ls) bind i (Cons a gamma) (x:xs) g = bind (paramT l i a x) $ \xi -> paramTele' ls bind i (gamma (vcPair i x xi a)) xs g
 
 paramTele :: Int -> BindOp -> Color -> VTele -> [Val] -> (Val -> Val) -> Val
 paramTele n = paramTele' (paramLevels n)
@@ -160,12 +160,13 @@ apps = foldl app
 
 paramTelescope :: Int -> Color -> Env -> Tele -> [Val] -> Val
 paramTelescope n i env ((b,t):tele) (a:as) =
-  vSig (paramT n i t' a) (\ai -> paramTelescope n i (Pair env (b,VCPair i a ai t')) tele as)
+  vSig (paramT n i t' a) (\ai -> paramTelescope n i (Pair env (b,vcPair i a ai t')) tele as)
   where t' = eval env t
 paramTelescope n i env [] [] = Ter (Sum ("1",Loc "paramTelescope"(1,1)) []) Empty
 
 paramT :: Int -> Color -> Val -> Val -> Val
-paramT n i t0 xx = case t0 of
+paramT n i t0 xx =
+  case t0 of
   VU -> vFun xx VU
   Ter (Sum _ lblsum) env -> case xx of
     VCon c as ->
@@ -192,9 +193,6 @@ paramArgs n i xs = zipWith (\l -> param l i) (paramLevels n) xs
 
 param :: Int -> Color -> Val -> Val
 param n i t0 = case t0 of
-  -- Ter (Sum p lblsum) env -> flip Ter env $ Split (snd p) -- FIXME: encode n i in here.
-  --    [(con,) | (con,vars) <- lblsum]
-
   -- VLam a f -> VLam (face i a) $ \x -> VLam (extT a x) $ \xi -> ext (f $ VCPair i x xi a)
   -- Function
   _ | Just tele <- lenT (2^(n-1)) getLamTeleN t0 ->
@@ -250,13 +248,20 @@ neuTyp v0 = case v0 of
      _ -> error "neuTyp: VSnd: panic"
 
 
--- FIXME: VCPair of a vcon must reduce.: (Cons x xs, (xi, xsi))  ---> Cons (x,xi) (xs,xsi)
+vcPairs i (a:as) ps = VCPair i a (fstSVal ps) (VVar "vcPair: FIXME: unknown type" VU) : vcPairs i as (sndSVal ps)
+
+vcPair i (VCon lab as) ps ty = VCon lab $ vcPairs i as ps
+-- eg: (Cons x xs, (xi, xsi))  ---> Cons (x,xi) (xs,xsi)
+vcPair i a p ty = VCPair i a p ty
+  
 
 app :: Val -> Val -> Val
-app (VApp (VParam 1 i f@(Ter _ _)) a) ai = VParam 1 i (f `app` (VCPair i a ai arg))
+app (VApp (VParam 1 i f) a) ai | isHungry f = VParam 1 i (f `app` (vcPair i a ai arg))
   where VPi arg _ = neuTyp f
--- FIXME. This is useful, for example, if f is a split (or param of split...). But currently we are restricted to n=1 (also to just Ter for bad reasons)!
-app (VCPair i f g (VPi _a b)) u = VCPair i (app f (face i u)) ((g `app` (face i u)) `app` param 1 i u) (b `app` u)
+-- FIXME. This is useful, for example, if f is a Ter (Split,Sum) (or
+-- param of therof). But currently we are restricted to n=1.
+-- We do not do this in general because it conflicts with the expansion of lambdas.
+app (VCPair i f g (VPi _a b)) u = vcPair i (app f (face i u)) ((g `app` (face i u)) `app` param 1 i u) (b `app` u)
 app (VLam _ f) u = f u
 app (Ter (Split _ nvs) e) (VCon name us) = case lookup name nvs of
     Just (xs,t) -> eval (upds e (zip xs us)) t
