@@ -6,8 +6,11 @@ data Nat = Zero | Succ (n : Nat)
 List : U -> U
 data List (a : U) = Nil | Cons (x : a) (xs : List a)
 
+nil : (a : U) -> List a
+nil (a : U) = Nil
 
 append : (a : U) -> List a -> List a -> List a
 append (a : U) = split Nil -> \ (ys : List a) -> ys
                        Cons x xs -> \(ys : List a) -> Cons x (append a xs ys)
+
 

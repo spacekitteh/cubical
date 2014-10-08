@@ -162,7 +162,7 @@ paramTelescope :: Int -> Color -> Env -> Tele -> [Val] -> Val
 paramTelescope n i env ((b,t):tele) (a:as) =
   vSig (paramT n i t' a) (\ai -> paramTelescope n i (Pair env (b,vcPair i a ai t')) tele as)
   where t' = eval env t
-paramTelescope n i env [] [] = Ter (Sum ("1",Loc "paramTelescope"(1,1)) []) Empty
+paramTelescope n i env [] [] = Ter (Sum ("1",Loc "paramTelescope"(1,1)) [(("tt",Loc "paramTelescope" (2,1)),[])]) Empty
 
 paramT :: Int -> Color -> Val -> Val -> Val
 paramT n i t0 xx =
@@ -199,6 +199,7 @@ param n i t0 = case t0 of
     faceTele VLam i tele [] $ \xs ->
     paramTele n VLam i tele xs $ \b ->
     param n i b
+  VCon lab as -> foldr VSPair (VCon "tt" []) (paramArgs n i as)
   VCPair j a b ty | j == i -> b
                   | otherwise -> VCPair j (ext a) (param (n+1) i b) (extT ty (face i t0))
   VSPair a b -> VSPair (ext a) (ext b)
